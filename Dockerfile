@@ -12,9 +12,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source code and entrypoint into the container
+# Copy source code and entrypoints into the container
 COPY src/ ./src/
 COPY main.py .
+COPY consumer_main.py .
 
 # Trigger the ETL orchestrator by default for Kubernetes CronJob execution
 CMD ["python", "main.py"]
