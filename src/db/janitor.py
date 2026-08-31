@@ -41,7 +41,7 @@ class DatabaseJanitor:
         Executes a DELETE statement on the city_events table to clean up past events.
         Business Logic:
           - Delete IF end_date is strictly before CURRENT_DATE (timezone-aware UTC)
-          - OR IF end_date is NULL and start_date (or date) is strictly before CURRENT_DATE.
+          - OR IF end_date is NULL and start_date (or legacy date) is strictly before CURRENT_DATE.
 
         Returns:
             int: The exact number of rows deleted.
@@ -58,9 +58,9 @@ class DatabaseJanitor:
             delete_sql = """
                 DELETE FROM city_events
                 WHERE (end_date IS NOT NULL AND end_date < %(current_date)s)
-                   OR (end_date IS NULL AND COALESCE(start_date, date) < %(current_date)s);
+                   OR (end_date IS NULL AND start_date < %(current_date)s);
             """
-        elif "end_date" in cols:
+        elif "end_date" in cols and "date" in cols:
             delete_sql = """
                 DELETE FROM city_events
                 WHERE (end_date IS NOT NULL AND end_date < %(current_date)s)
