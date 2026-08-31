@@ -92,12 +92,12 @@ def init_db_schema(pool: ConnectionPool) -> Set[str]:
                 detected_cols = {row["column_name"] for row in cursor.fetchall()}
                 if detected_cols:
                     _AVAILABLE_COLUMNS = detected_cols
-                logger.info(f"✅ [DB] Active city_events columns detected: {sorted(list(_AVAILABLE_COLUMNS))}")
+                logger.info(f"[DB] Active city_events columns detected: {sorted(list(_AVAILABLE_COLUMNS))}")
 
         return _AVAILABLE_COLUMNS
 
     except Exception as e:
-        logger.error(f"❌ [DB] Error during schema verification: {e}")
+        logger.error(f"[DB] Error during schema verification: {e}")
         raise
 
 

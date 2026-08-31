@@ -1,0 +1,42 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: famloom-event-janitor
+  labels:
+    app: famloom-event-janitor
+    tier: maintenance-worker
+spec:
+  # Run daily at 01:00 UTC
+  schedule: "0 1 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: famloom-event-janitor
+        spec:
+          containers:
+          - name: janitor-container
+            image: famloom-dataprep:local
+            imagePullPolicy: Never
+            command: ["python", "janitor.py"]
+            env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: PYTHONIOENCODING
+              value: "utf-8"
+            # Injects database credentials from Kubernetes secret
+            envFrom:
+            - secretRef:
+                name: dataprep-secrets
+            resources:
+              requests:
+                cpu: "50m"
+                memory: "64Mi"
+              limits:
+                cpu: "250m"
+                memory: "256Mi"
+          restartPolicy: OnFailure

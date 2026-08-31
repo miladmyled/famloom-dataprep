@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ ./src/
 COPY main.py .
 COPY consumer_main.py .
+COPY janitor.py .
 
 # Trigger the ETL orchestrator by default for Kubernetes CronJob execution
 CMD ["python", "main.py"]
