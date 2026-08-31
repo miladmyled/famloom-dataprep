@@ -1,6 +1,10 @@
 # Use a lightweight official Python image
 FROM python:3.11-slim
 
+# Set environment variables for unbuffered output and UTF-8 encoding
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONIOENCODING=utf-8
+
 # Set the working directory inside the container
 WORKDIR /app
 
@@ -8,8 +12,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy your source code into the container
+# Copy source code and entrypoint into the container
 COPY src/ ./src/
+COPY main.py .
 
-# By default, run the extractor or transformer (we will update this for Kafka later)
-CMD ["python", "-m", "src.etl.extractor"]
+# Trigger the ETL orchestrator by default for Kubernetes CronJob execution
+CMD ["python", "main.py"]
