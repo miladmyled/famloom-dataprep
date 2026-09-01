@@ -126,7 +126,7 @@ def test_process_valid_message_commits_offset(caplog):
         # Verify verbose debug metrics log appeared in telemetry
         assert "[CONSUMER DEBUG] Received message: topic=raw-events-ingestion partition=0 offset=100 key=eb_consumer_123" in caplog.text
         # Ensure manual commit was executed with exact message
-        mock_consumer_inst.commit.assert_called_once_with(message=mock_msg, asynchronous=False)
+        mock_consumer_inst.commit.assert_called_once_with(message=mock_msg, asynchronous=True)
 
 
 def test_process_poison_pill_commits_offset():
@@ -159,7 +159,7 @@ def test_process_poison_pill_commits_offset():
         # Ensure DB upsert was NOT called
         mock_upsert.assert_not_called()
         # Ensure offset was committed so consumer is not blocked
-        mock_consumer_inst.commit.assert_called_once_with(message=mock_msg, asynchronous=False)
+        mock_consumer_inst.commit.assert_called_once_with(message=mock_msg, asynchronous=True)
 
 
 def test_database_error_skips_commit():

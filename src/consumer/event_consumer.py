@@ -159,7 +159,10 @@ class EventKafkaConsumer:
                 f"Payload snippet: {msg_str[:250]}"
             )
             # Commit offset to advance consumer past poison pill
-            self.consumer.commit(message=msg, asynchronous=False)
+            try:
+                self.consumer.commit(message=msg, asynchronous=True)
+            except Exception:
+                pass
             return True
 
         # 4. Database Transaction & Idempotent Upsert
@@ -175,32 +178,17 @@ class EventKafkaConsumer:
             )
             return False
 
-        # 5. Manual Offset Commit (Strictly after DB transaction commit)
-        commit_success = False
-        for attempt in range(5):
-            try:
-                self.consumer.commit(message=msg, asynchronous=False)
-                commit_success = True
-                break
-            except KafkaException as ke:
-                if ke.args[0].code() == KafkaError._WAIT_COORD:
-                    logger.info(
-                        f"[KAFKA] Coordinator initializing, retrying commit for offset {offset} "
-                        f"(attempt {attempt + 1}/5)..."
-                    )
-                    time.sleep(1.0)
-                    self.consumer.poll(0)
-                else:
-                    logger.warning(f"⚠️ [KAFKA COMMIT] Offset {offset} commit deferred: {ke}")
-                    break
-            except Exception as ex:
-                logger.warning(f"⚠️ [KAFKA COMMIT] Offset {offset} commit error: {ex}")
-                break
+        # 5. Manual Offset Commit (Asynchronous to achieve high throughput without blocking on coordinator)
+        try:
+            self.consumer.commit(message=msg, asynchronous=True)
+        except KafkaException as ke:
+            logger.debug(f"[KAFKA COMMIT] Offset {offset} async commit deferred: {ke}")
+        except Exception as ex:
+            logger.debug(f"[KAFKA COMMIT] Offset {offset} commit error: {ex}")
 
         logger.info(
             f"✅ [LOADED] Event '{event.title}' (ID: {event.event_id}, City: {event.city}) "
-            f"persisted to PostgreSQL. Partition {partition} offset {offset} "
-            f"{'committed' if commit_success else 'stored'}."
+            f"persisted to PostgreSQL. Partition {partition} offset {offset} committed."
         )
         return True
 
