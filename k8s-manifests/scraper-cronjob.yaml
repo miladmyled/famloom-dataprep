@@ -1,13 +1,14 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: famloom-event-janitor
+  name: famloom-scraper
   labels:
-    app: famloom-event-janitor
-    tier: maintenance-worker
+    app: famloom-scraper
+    tier: producer-worker
 spec:
-  # Execute daily at 01:00 UTC
-  schedule: "0 1 * * *"
+  # Execute exactly every 5 minutes
+  schedule: "*/5 * * * *"
+  # Prevents overlapping executions if a scrape takes longer (e.g. rate-limit backoffs)
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -16,27 +17,27 @@ spec:
       template:
         metadata:
           labels:
-            app: famloom-event-janitor
+            app: famloom-scraper
         spec:
           containers:
-          - name: janitor-container
+          - name: scraper-container
             image: famloom-dataprep:latest
             imagePullPolicy: IfNotPresent
-            command: ["python", "janitor.py"]
+            command: ["python", "main.py"]
             env:
             - name: PYTHONUNBUFFERED
               value: "1"
             - name: PYTHONIOENCODING
               value: "utf-8"
-            # Injects database credentials from Kubernetes secret
+            # Injects Kafka and Azure PostgreSQL credentials
             envFrom:
             - secretRef:
                 name: dataprep-secrets
             resources:
               requests:
-                cpu: "50m"
-                memory: "64Mi"
+                cpu: "100m"
+                memory: "128Mi"
               limits:
-                cpu: "250m"
-                memory: "256Mi"
+                cpu: "500m"
+                memory: "512Mi"
           restartPolicy: OnFailure

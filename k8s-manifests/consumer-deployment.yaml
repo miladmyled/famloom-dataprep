@@ -4,7 +4,7 @@ metadata:
   name: famloom-event-consumer
   labels:
     app: famloom-event-consumer
-    tier: background-worker
+    tier: consumer-worker
 spec:
   replicas: 1
   strategy:
@@ -20,19 +20,19 @@ spec:
       labels:
         app: famloom-event-consumer
     spec:
-      # Grace period allowing in-flight messages to commit and Kafka consumer group rebalance cleanly
+      # Allows the Kafka consumer to cleanly commit in-flight offsets, leave group, and close DB pools
       terminationGracePeriodSeconds: 30
       containers:
       - name: consumer-container
-        image: famloom-dataprep:local
-        imagePullPolicy: Never
+        image: famloom-dataprep:latest
+        imagePullPolicy: IfNotPresent
         command: ["python", "consumer_main.py"]
         env:
         - name: PYTHONUNBUFFERED
           value: "1"
         - name: PYTHONIOENCODING
           value: "utf-8"
-        # Injects Azure PostgreSQL & Kafka credentials from Kubernetes secret
+        # Injects Kafka and Azure PostgreSQL credentials
         envFrom:
         - secretRef:
             name: dataprep-secrets
