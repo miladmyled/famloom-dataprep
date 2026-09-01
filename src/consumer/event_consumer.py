@@ -80,6 +80,28 @@ class EventKafkaConsumer:
         # Initialize confluent-kafka Consumer
         try:
             self.consumer = Consumer(self.config)
+
+            # Verify connectivity to Kafka cluster immediately on boot
+            broker_addr = self.config.get("bootstrap.servers")
+            logger.info(f"[CONSUMER] Verifying connectivity to Kafka broker '{broker_addr}'...")
+            try:
+                cluster_meta = self.consumer.list_topics(timeout=10.0)
+                avail_topics = list(cluster_meta.topics.keys())
+                logger.info(
+                    f"✅ [CONSUMER] Broker connection verified! Nodes: {len(cluster_meta.brokers)}, "
+                    f"Cluster topics: {avail_topics}"
+                )
+                if self.topic not in cluster_meta.topics:
+                    logger.warning(
+                        f"⚠️ [CONSUMER] Target topic '{self.topic}' not yet found on broker. Existing topics: {avail_topics}"
+                    )
+            except Exception as conn_err:
+                logger.error(
+                    f"❌ [CONSUMER CONNECTION FAILED] Unable to reach Kafka broker at '{broker_addr}': {conn_err}\n"
+                    f"Please verify KAFKA_BOOTSTRAP_SERVERS address and cluster network DNS/routing."
+                )
+                raise
+
             self.consumer.subscribe([self.topic], on_assign=on_assign, on_revoke=on_revoke)
             logger.info(
                 f"[CONSUMER] Initialized Consumer (Group: '{self.config.get('group.id')}', "
