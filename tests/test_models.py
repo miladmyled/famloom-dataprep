@@ -23,6 +23,34 @@ def test_city_event_valid_future():
     assert event.date == future_date
 
 
+def test_city_event_13_days_future_passes():
+    """Assert that an event 13 days in the future passes validation within the 14-day window."""
+    future_13_days = datetime.now(timezone.utc) + timedelta(days=13)
+    event = CityEvent(
+        event_id="eventbrite_13days",
+        city="Vancouver, BC",
+        title="13-Day Future Event",
+        url="https://eventbrite.com/e/future-13",
+        start_date=future_13_days,
+    )
+    assert event.start_date.date() == future_13_days.date()
+
+
+def test_city_event_15_days_future_rejected():
+    """Assert that an event 15 days in the future is successfully rejected outside the 14-day window."""
+    future_15_days = datetime.now(timezone.utc) + timedelta(days=15)
+    with pytest.raises(ValidationError) as exc_info:
+        CityEvent(
+            event_id="eventbrite_15days",
+            city="Vancouver, BC",
+            title="15-Day Future Event",
+            url="https://eventbrite.com/e/future-15",
+            start_date=future_15_days,
+        )
+    err_msg = str(exc_info.value)
+    assert "14-day ingestion window" in err_msg or "strictly greater than" in err_msg
+
+
 def test_city_event_iso_string_conversion():
     future_date_iso = (datetime.now(timezone.utc) + timedelta(days=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
     event = CityEvent(

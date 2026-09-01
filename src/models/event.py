@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
@@ -6,7 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, mod
 class CityEvent(BaseModel):
     """
     Defines the strict schema for family-friendly city events.
-    Pydantic automatically validates incoming scraped data against these rules.
+    Pydantic automatically validates incoming scraped data against these rules,
+    enforcing a strict 14-day rolling ingestion window.
     """
     model_config = ConfigDict(
         str_strip_whitespace=True,
@@ -71,15 +72,24 @@ class CityEvent(BaseModel):
 
     @field_validator("start_date", mode="after")
     @classmethod
-    def validate_future_date(cls, v: datetime) -> datetime:
+    def validate_date_window(cls, v: datetime) -> datetime:
         """
-        Strict Business Rule: Automatically drop any event where start_date
-        is strictly before CURRENT_DATE (in UTC). Only future events (today or later) survive.
+        Strict Business Rule: Enforce a strict 14-day rolling ingestion window.
+        1. Automatically drop any event where start_date is strictly before CURRENT_DATE (in UTC).
+        2. Automatically drop any event where start_date is strictly greater than CURRENT_DATE + 14 days (in UTC).
+        Only events scheduled for today through today + 14 days survive.
         """
         current_utc_date = datetime.now(timezone.utc).date()
+        max_utc_date = current_utc_date + timedelta(days=14)
+
         if v.date() < current_utc_date:
             raise ValueError(
                 f"Event start_date '{v.isoformat()}' (date: {v.date()}) is strictly before "
-                f"CURRENT_DATE '{current_utc_date}'. Only events scheduled for today or later are valid."
+                f"CURRENT_DATE '{current_utc_date}'. Event falls outside the 14-day ingestion window."
+            )
+        if v.date() > max_utc_date:
+            raise ValueError(
+                f"Event start_date '{v.isoformat()}' (date: {v.date()}) is strictly greater than "
+                f"14-day window maximum '{max_utc_date}'. Event falls outside the 14-day ingestion window."
             )
         return v

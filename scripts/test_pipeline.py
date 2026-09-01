@@ -2,7 +2,7 @@
 End-to-End Test Script for Famloom DataPrep Pipeline
 Tests:
 1. Database Connectivity & Schema Verification
-2. Event Scraper Normalization & Timezone-Aware Validation
+2. Event Scraper Normalization & Timezone-Aware Validation (14-Day Window)
 3. Direct Idempotent PostgreSQL Upsert & Tombstone Updates
 4. Poison Pill Handling Simulation
 """
@@ -37,22 +37,26 @@ def run_tests():
         print(f"[FAILED] Database connection failed: {e}\n")
         return 1
 
-    # TEST 2: Scraper Normalization & Validation
-    print("[TEST 2/4] Testing Eventbrite Scraper & Timezone Validation...")
+    # TEST 2: Scraper Normalization & Validation (14-Day Window)
+    print("[TEST 2/4] Testing Eventbrite Scraper & Timezone 14-Day Window Validation...")
     scraper = EventbriteScraper(city="Vancouver, BC, Canada", max_pages=1)
     raw_events = scraper.fetch_raw_events()
 
     if raw_events:
         print(f"[SUCCESS] Fetched {len(raw_events)} live events from Eventbrite API!")
-        normalized = scraper.normalize_data(raw_events[:3])
-        sample_event = clean_and_validate_event(normalized[0])
+        normalized = scraper.normalize_data(raw_events[:5])
+        sample_event = None
+        for raw in normalized:
+            sample_event = clean_and_validate_event(raw)
+            if sample_event:
+                break
         if sample_event:
             print(f"   Sample Validated Event: '{sample_event.title}'")
             print(f"   ID: {sample_event.event_id} | Start UTC: {sample_event.start_date}")
             print(f"   Status: {sample_event.status} | Is Canceled: {sample_event.is_canceled}\n")
     else:
         print("[INFO] Live API returned 0 events or token not configured. Using mock event.")
-        future_date = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
+        future_date = (datetime.now(timezone.utc) + timedelta(days=10)).isoformat()
         sample_event = clean_and_validate_event({
             "event_id": "eb_e2e_test_001",
             "city": "Vancouver, BC, Canada",
@@ -101,8 +105,8 @@ def run_tests():
         conn.commit()
         print("   [D] Cleaned up temporary test record.\n")
 
-    # TEST 4: Poison Pill Validation Rejection
-    print("[TEST 4/4] Testing Poison Pill Rejection (Corrupt / Past Events)...")
+    # TEST 4: Poison Pill Validation Rejection (>14 days or past date)
+    print("[TEST 4/4] Testing Poison Pill Rejection (Past & Beyond 14-Day Window)...")
     past_event = clean_and_validate_event({
         "event_id": "eb_past_poison",
         "city": "Vancouver, BC, Canada",
@@ -111,7 +115,16 @@ def run_tests():
         "start_date": (datetime.now(timezone.utc) - timedelta(days=5)).isoformat(),
     })
     assert past_event is None, "Past event should have been dropped!"
-    print("[SUCCESS] Poison pill (past event) was safely rejected without crashing.\n")
+
+    far_future_event = clean_and_validate_event({
+        "event_id": "eb_far_future_poison",
+        "city": "Vancouver, BC, Canada",
+        "title": "Far Future Event (25 days)",
+        "url": "https://eventbrite.ca/e/far-future",
+        "start_date": (datetime.now(timezone.utc) + timedelta(days=25)).isoformat(),
+    })
+    assert far_future_event is None, "Far future event beyond 14 days should have been dropped!"
+    print("[SUCCESS] Poison pills (past and beyond 14-day window) were safely rejected.\n")
 
     pool.close()
     print("========================================================")

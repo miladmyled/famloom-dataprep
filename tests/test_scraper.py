@@ -13,7 +13,8 @@ def test_base_scraper_inheritance():
 
 def test_eventbrite_normalization():
     scraper = EventbriteScraper(city="Coquitlam, BC")
-    future_utc = (datetime.now(timezone.utc) + timedelta(days=14)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    future_utc = (datetime.now(timezone.utc) + timedelta(days=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    future_date_str = (datetime.now(timezone.utc) + timedelta(days=8)).strftime("%Y-%m-%d")
 
     raw_eventbrite_response = [
         {
@@ -34,7 +35,7 @@ def test_eventbrite_normalization():
             "id": "987654321",
             "name": "Canceled Kids Puppet Theatre",
             "url": "https://www.eventbrite.com/e/kids-puppet-987654321",
-            "start_date": "2026-09-20",
+            "start_date": future_date_str,
             "start_time": "14:00",
             "timezone": "America/Vancouver",
             "status": "canceled",
