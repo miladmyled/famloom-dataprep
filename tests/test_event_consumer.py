@@ -2,6 +2,7 @@ import json
 import logging
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, MagicMock
+from confluent_kafka import TopicPartition, OFFSET_BEGINNING
 from src.consumer.event_consumer import EventKafkaConsumer
 
 
@@ -26,6 +27,36 @@ def test_consumer_configuration():
         assert call_args[0] == ["raw-events-ingestion"]
         assert "on_assign" in call_kwargs
         assert "on_revoke" in call_kwargs
+
+
+def test_consumer_rebalance_on_assign_auto_reset():
+    with patch("src.consumer.event_consumer.Consumer") as mock_consumer_cls, \
+         patch("src.consumer.event_consumer.init_db_schema"), \
+         patch.dict("os.environ", {"KAFKA_RESET_OFFSET_ON_START": "true"}):
+
+        mock_consumer_inst = MagicMock()
+        mock_consumer_cls.return_value = mock_consumer_inst
+        mock_db_pool = MagicMock()
+
+        consumer = EventKafkaConsumer(
+            kafka_config={"bootstrap.servers": "localhost:9092", "group.id": "test-group", "enable.auto.commit": False},
+            topic="raw-events-ingestion",
+            db_pool=mock_db_pool,
+        )
+
+        call_args, call_kwargs = mock_consumer_inst.subscribe.call_args
+        on_assign = call_kwargs["on_assign"]
+
+        partition = TopicPartition("raw-events-ingestion", 0)
+        mock_consumer_inst.committed.return_value = [TopicPartition("raw-events-ingestion", 0, 289)]
+        mock_consumer_inst.get_watermark_offsets.return_value = (0, 289)
+
+        # Trigger on_assign callback
+        on_assign(mock_consumer_inst, [partition])
+
+        # Verify that auto-reset set offset to OFFSET_BEGINNING and assigned
+        assert partition.offset == OFFSET_BEGINNING
+        mock_consumer_inst.assign.assert_called_once_with([partition])
 
 
 def test_process_valid_message_commits_offset(caplog):

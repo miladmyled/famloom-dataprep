@@ -1,4 +1,4 @@
-import json
+import time
 import logging
 from typing import Any, Dict, Optional
 from confluent_kafka import Producer, KafkaError, KafkaException
@@ -13,7 +13,8 @@ class EventKafkaProducer:
     """
     Production-ready Kafka Producer leveraging confluent-kafka.
     Serializes validated CityEvent instances to JSON, produces messages
-    with idempotency keys, and handles asynchronous delivery report callbacks.
+    with idempotency keys, tracks delivery acknowledgment metrics,
+    and enforces robust buffer flushing with retries.
     """
 
     def __init__(
@@ -23,6 +24,8 @@ class EventKafkaProducer:
     ):
         self.config = config or get_kafka_producer_config()
         self.topic = topic or get_kafka_topic()
+        self.delivered_count = 0
+        self.failed_count = 0
         
         try:
             self.producer = Producer(self.config)
@@ -34,17 +37,18 @@ class EventKafkaProducer:
             logger.error(f"[KAFKA] Failed to initialize Confluent Kafka Producer: {e}")
             raise
 
-    @staticmethod
-    def delivery_report(err: Optional[KafkaError], msg: Any) -> None:
+    def delivery_report(self, err: Optional[KafkaError], msg: Any) -> None:
         """
         Asynchronous callback invoked by confluent-kafka once a message
-        has been successfully delivered or failed permanently.
+        has been successfully delivered to the broker or failed permanently.
         """
         if err is not None:
+            self.failed_count += 1
             logger.error(
                 f"[KAFKA] Delivery FAILED for record key='{msg.key() if msg else 'None'}': {err}"
             )
         else:
+            self.delivered_count += 1
             key_str = msg.key().decode("utf-8") if msg.key() else "None"
             logger.info(
                 f"[KAFKA] Delivered to topic '{msg.topic()}' [partition {msg.partition()}] "
@@ -97,18 +101,45 @@ class EventKafkaProducer:
             logger.error(f"[KAFKA] Unexpected error serializing/publishing event {event.event_id}: {ex}")
             return False
 
-    def flush(self, timeout: float = 10.0) -> int:
+    def flush(self, timeout: float = 30.0, max_attempts: int = 3) -> int:
         """
-        Flushes any outstanding messages in the producer buffer.
-        Must be called prior to process termination to guarantee zero message loss.
+        Flushes outstanding messages from librdkafka's internal buffer across
+        the network to Kafka brokers. Retries automatically if initial timeout is reached.
 
         Returns:
-            int: Number of messages still un-flushed upon timeout (0 indicates full success).
+            int: Number of messages still un-flushed upon final timeout (0 indicates 100% success).
         """
-        logger.info(f"[KAFKA] Flushing producer buffer (Timeout: {timeout}s)...")
-        remaining = self.producer.flush(timeout)
-        if remaining > 0:
-            logger.warning(f"[KAFKA] Flush timeout reached. {remaining} messages remained in buffer.")
-        else:
-            logger.info("[KAFKA] Producer buffer successfully flushed. All records delivered.")
+        logger.info(f"[KAFKA] Flushing producer buffer (Timeout per attempt: {timeout}s)...")
+        start_time = time.time()
+        remaining = len(self.producer)
+
+        for attempt in range(1, max_attempts + 1):
+            remaining = self.producer.flush(timeout)
+            if remaining == 0:
+                elapsed = time.time() - start_time
+                logger.info(
+                    f"✅ [KAFKA] Producer buffer successfully drained in {elapsed:.2f}s! "
+                    f"All {self.delivered_count} records acknowledged by broker."
+                )
+                return 0
+            
+            logger.warning(
+                f"⚠️ [KAFKA] Flush attempt {attempt}/{max_attempts} timed out. "
+                f"{remaining} messages still in buffer."
+            )
+            # Serve any pending events before retrying
+            self.producer.poll(1.0)
+
+        logger.error(
+            f"❌ [KAFKA] Critical: Failed to flush {remaining} messages after "
+            f"{max_attempts} attempts ({time.time() - start_time:.2f}s total)."
+        )
         return remaining
+
+    def get_delivery_metrics(self) -> Dict[str, int]:
+        """Returns confirmed delivery acknowledgment counters."""
+        return {
+            "delivered": self.delivered_count,
+            "failed": self.failed_count,
+            "buffered": len(self.producer),
+        }

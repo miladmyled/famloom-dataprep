@@ -1,8 +1,9 @@
+import os
 import json
 import time
 import logging
 from typing import Any, Dict, List, Optional
-from confluent_kafka import Consumer, KafkaError, KafkaException, TopicPartition
+from confluent_kafka import Consumer, KafkaError, KafkaException, TopicPartition, OFFSET_BEGINNING
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
@@ -38,11 +39,36 @@ class EventKafkaConsumer:
 
         # Rebalance callbacks for partition tracking diagnostics
         def on_assign(consumer: Consumer, partitions: List[TopicPartition]) -> None:
-            for p in partitions:
-                logger.info(
-                    f"[CONSUMER REBALANCE] Assigned partition: topic={p.topic} "
-                    f"partition={p.partition} offset={p.offset}"
-                )
+            try:
+                # Query committed offsets vs. low/high watermarks for partition visibility
+                committed = consumer.committed(partitions, timeout=10.0)
+                for p, c in zip(partitions, committed):
+                    try:
+                        low, high = consumer.get_watermark_offsets(p, timeout=10.0, cached=False)
+                    except Exception:
+                        low, high = "unknown", "unknown"
+
+                    committed_offset = c.offset if c else "none"
+                    logger.info(
+                        f"[CONSUMER REBALANCE] Assigned partition: topic={p.topic} "
+                        f"partition={p.partition} committed_offset={committed_offset} "
+                        f"(watermarks: earliest={low}, latest={high})"
+                    )
+
+                # Optional automatic offset recovery: force seek to earliest on startup if requested
+                if os.getenv("KAFKA_RESET_OFFSET_ON_START", "false").lower() in ("1", "true", "yes"):
+                    logger.warning(
+                        "⚠️ [CONSUMER] KAFKA_RESET_OFFSET_ON_START enabled! "
+                        "Seeking all assigned partitions to OFFSET_BEGINNING."
+                    )
+                    for p in partitions:
+                        p.offset = OFFSET_BEGINNING
+                    consumer.assign(partitions)
+
+            except Exception as rebalance_err:
+                logger.warning(f"[CONSUMER REBALANCE] Error diagnosing partition offsets: {rebalance_err}")
+                for p in partitions:
+                    logger.info(f"[CONSUMER REBALANCE] Assigned partition: topic={p.topic} partition={p.partition}")
 
         def on_revoke(consumer: Consumer, partitions: List[TopicPartition]) -> None:
             for p in partitions:
@@ -163,11 +189,11 @@ class EventKafkaConsumer:
                 msg = self.consumer.poll(timeout=poll_timeout)
                 if msg is None:
                     idle_polls += 1
-                    # Heartbeat log every 30 seconds of idle polling to confirm active polling state
+                    # Heartbeat log every 30 seconds of idle polling at INFO level for kubectl logs
                     if idle_polls >= 30:
-                        logger.debug(
-                            f"[CONSUMER HEARTBEAT] Polling active on topic '{self.topic}'. "
-                            "Waiting for incoming messages..."
+                        logger.info(
+                            f"[CONSUMER HEARTBEAT] Polling active on topic '{self.topic}' "
+                            f"(idle for {idle_polls}s). Awaiting incoming messages..."
                         )
                         idle_polls = 0
                     continue

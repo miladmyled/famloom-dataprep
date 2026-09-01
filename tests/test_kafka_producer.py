@@ -41,19 +41,28 @@ def test_kafka_producer_publish_event():
 
 
 def test_kafka_producer_delivery_report():
-    # Test successful delivery callback
-    mock_msg = MagicMock()
-    mock_msg.topic.return_value = "raw-events-ingestion"
-    mock_msg.partition.return_value = 0
-    mock_msg.offset.return_value = 42
-    mock_msg.key.return_value = b"eb_123"
+    with patch("src.etl.kafka_producer.Producer"):
+        producer = EventKafkaProducer(config={"bootstrap.servers": "localhost:9092"})
 
-    EventKafkaProducer.delivery_report(None, mock_msg)
+        # Test successful delivery callback
+        mock_msg = MagicMock()
+        mock_msg.topic.return_value = "raw-events-ingestion"
+        mock_msg.partition.return_value = 0
+        mock_msg.offset.return_value = 42
+        mock_msg.key.return_value = b"eb_123"
 
-    # Test error delivery callback
-    mock_err = MagicMock()
-    mock_err.__str__.return_value = "Broker: Message timed out"
-    EventKafkaProducer.delivery_report(mock_err, mock_msg)
+        producer.delivery_report(None, mock_msg)
+        assert producer.delivered_count == 1
+
+        # Test error delivery callback
+        mock_err = MagicMock()
+        mock_err.__str__.return_value = "Broker: Message timed out"
+        producer.delivery_report(mock_err, mock_msg)
+        assert producer.failed_count == 1
+
+        metrics = producer.get_delivery_metrics()
+        assert metrics["delivered"] == 1
+        assert metrics["failed"] == 1
 
 
 def test_kafka_producer_flush():

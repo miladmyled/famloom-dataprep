@@ -7,11 +7,10 @@ metadata:
     tier: consumer-worker
 spec:
   replicas: 1
+  # Recreate strategy ensures old pod cleanly leaves group before new pod starts,
+  # preventing consumer group rebalance deadlocks on single-partition topics.
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
+    type: Recreate
   selector:
     matchLabels:
       app: famloom-event-consumer
@@ -32,6 +31,9 @@ spec:
           value: "1"
         - name: PYTHONIOENCODING
           value: "utf-8"
+        # Set to "true" if you need the consumer pod to automatically rewind to partition 0 offset 0 on startup
+        - name: KAFKA_RESET_OFFSET_ON_START
+          value: "false"
         # Injects Kafka and Azure PostgreSQL credentials
         envFrom:
         - secretRef:

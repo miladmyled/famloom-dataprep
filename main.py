@@ -1,7 +1,7 @@
 import sys
 import time
 import logging
-from typing import List
+from typing import List, Optional
 from dotenv import load_dotenv
 
 # Load environment configuration
@@ -27,9 +27,9 @@ def run_etl_pipeline() -> int:
     1. Extracts active target cities from Azure PostgreSQL.
     2. Initializes Confluent Kafka Producer for raw-events-ingestion topic.
     3. Scrapes external family-friendly events for each city via Eventbrite API.
-    4. Validates and filters events against strict business rules (future events only, timezone-aware).
+    4. Validates and filters events against strict business rules (future events only, timezone-aware, 14-day window).
     5. Streams valid and tombstone event records to Kafka with idempotency keys.
-    6. Flushes Kafka producer buffer before exiting.
+    6. Flushes Kafka producer buffer incrementally and guarantees final flush in finally block.
     """
     start_time = time.time()
     logger.info("==================================================")
@@ -52,6 +52,7 @@ def run_etl_pipeline() -> int:
 
     # 2. Initialize Kafka Producer
     logger.info("[STEP 2/4] Initializing Confluent Kafka Producer...")
+    producer: Optional[EventKafkaProducer] = None
     try:
         producer = EventKafkaProducer()
     except Exception as k_err:
@@ -64,9 +65,10 @@ def run_etl_pipeline() -> int:
         "cities_processed": 0,
         "raw_events_scraped": 0,
         "valid_events": 0,
-        "published_to_kafka": 0,
+        "queued_to_kafka": 0,
         "dropped_events": 0,
     }
+    unflushed = 0
 
     try:
         for city in active_cities:
@@ -81,6 +83,7 @@ def run_etl_pipeline() -> int:
             normalized_events = scraper.normalize_data(raw_events)
 
             # Transform, Validate, and Stream
+            city_queued = 0
             for raw_dict in normalized_events:
                 valid_event = clean_and_validate_event(raw_dict)
 
@@ -88,7 +91,8 @@ def run_etl_pipeline() -> int:
                     metrics["valid_events"] += 1
                     success = producer.publish_event(valid_event)
                     if success:
-                        metrics["published_to_kafka"] += 1
+                        metrics["queued_to_kafka"] += 1
+                        city_queued += 1
                     else:
                         metrics["dropped_events"] += 1
                 else:
@@ -96,16 +100,29 @@ def run_etl_pipeline() -> int:
 
             metrics["cities_processed"] += 1
 
+            # Drain batch buffer incrementally per city
+            if city_queued > 0:
+                logger.info(f"⚡ Dispatched {city_queued} events for '{city}'. Draining network batch...")
+                producer.flush(timeout=5.0, max_attempts=1)
+
     except KeyboardInterrupt:
         logger.warning("⚠️ Interrupted by signal. Commencing graceful shutdown...")
     except Exception as pipeline_err:
         logger.error(f"❌ Unexpected pipeline error during execution: {pipeline_err}", exc_info=True)
 
-    # 4. Flush Kafka Producer and finalize
-    logger.info("\n[STEP 4/4] Flushing Kafka producer buffer...")
-    unflushed = producer.flush(timeout=15.0)
+    finally:
+        # 4. Guarantee Kafka Producer buffer flush before process termination
+        if producer is not None:
+            logger.info("\n[STEP 4/4] Executing guaranteed final Kafka producer buffer flush...")
+            try:
+                unflushed = producer.flush(timeout=30.0, max_attempts=3)
+            except Exception as flush_err:
+                logger.error(f"❌ Error during final producer flush: {flush_err}")
+                unflushed = -1
 
+    delivery_stats = producer.get_delivery_metrics() if producer else {}
     elapsed = time.time() - start_time
+
     logger.info("==================================================")
     logger.info("📊 ETL PIPELINE EXECUTION SUMMARY")
     logger.info("==================================================")
@@ -113,7 +130,8 @@ def run_etl_pipeline() -> int:
     logger.info(f"🏙️ Cities Processed     : {metrics['cities_processed']}/{len(active_cities)}")
     logger.info(f"📥 Raw Events Scraped   : {metrics['raw_events_scraped']}")
     logger.info(f"✅ Validated Events     : {metrics['valid_events']}")
-    logger.info(f"📤 Published to Kafka   : {metrics['published_to_kafka']}")
+    logger.info(f"📤 Queued to Kafka      : {metrics['queued_to_kafka']}")
+    logger.info(f"🎯 Broker Acknowledged  : {delivery_stats.get('delivered', 0)}")
     logger.info(f"🗑️ Dropped Events       : {metrics['dropped_events']}")
     logger.info(f"⚠️ Unflushed Buffer Msg : {unflushed}")
     logger.info("==================================================")

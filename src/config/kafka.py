@@ -17,9 +17,10 @@ def get_kafka_producer_config() -> Dict[str, Any]:
         "bootstrap.servers": bootstrap_servers,
         "client.id": client_id,
         "acks": "all",
+        "enable.idempotence": True,
         "retries": int(os.getenv("KAFKA_RETRIES", "5")),
         "retry.backoff.ms": int(os.getenv("KAFKA_RETRY_BACKOFF_MS", "500")),
-        "socket.timeout.ms": int(os.getenv("KAFKA_SOCKET_TIMEOUT_MS", "10000")),
+        "socket.timeout.ms": int(os.getenv("KAFKA_SOCKET_TIMEOUT_MS", "15000")),
     }
 
     security_protocol = os.getenv("KAFKA_SECURITY_PROTOCOL")
@@ -49,6 +50,7 @@ def get_kafka_consumer_config() -> Dict[str, Any]:
       at-least-once delivery with manual post-database commits.
     - Explicit 'auto.offset.reset': 'earliest' to read from beginning if no offset exists.
     - Explicit 'session.timeout.ms': 45000 and 'max.poll.interval.ms': 300000.
+    - Cooperative-sticky partition assignment strategy for smooth rebalancing.
     """
     bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
     group_id = os.getenv("KAFKA_CONSUMER_GROUP_ID", "famloom-postgres-loader")
@@ -58,6 +60,7 @@ def get_kafka_consumer_config() -> Dict[str, Any]:
         "bootstrap.servers": bootstrap_servers,
         "group.id": group_id,
         "auto.offset.reset": auto_offset_reset,
+        "partition.assignment.strategy": "cooperative-sticky,roundrobin",
         # Strictly disabled: offsets committed manually only after successful DB transactions
         "enable.auto.commit": False,
         "session.timeout.ms": int(os.getenv("KAFKA_SESSION_TIMEOUT_MS", "45000")),
