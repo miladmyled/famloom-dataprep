@@ -3,7 +3,7 @@ import json
 import time
 import logging
 from typing import Any, Dict, List, Optional
-from confluent_kafka import Consumer, KafkaError, KafkaException, TopicPartition, OFFSET_BEGINNING
+from confluent_kafka import Consumer, KafkaError, KafkaException, TopicPartition, OFFSET_BEGINNING, OFFSET_STORED
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
@@ -78,7 +78,7 @@ class EventKafkaConsumer:
             use_direct_assignment = os.getenv("KAFKA_DIRECT_ASSIGN", "true").lower() in ("1", "true", "yes")
             if use_direct_assignment:
                 reset_on_start = os.getenv("KAFKA_RESET_OFFSET_ON_START", "true").lower() in ("1", "true", "yes")
-                initial_offset = OFFSET_BEGINNING if reset_on_start else confluent_kafka.OFFSET_STORED
+                initial_offset = OFFSET_BEGINNING if reset_on_start else OFFSET_STORED
                 tp = TopicPartition(self.topic, 0, initial_offset)
                 self.consumer.assign([tp])
                 logger.info(
