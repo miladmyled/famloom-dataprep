@@ -83,6 +83,7 @@ class EventKafkaConsumer:
             self.consumer.subscribe([self.topic], on_assign=on_assign, on_revoke=on_revoke)
             logger.info(
                 f"[CONSUMER] Initialized Consumer (Group: '{self.config.get('group.id')}', "
+                f"Brokers: '{self.config.get('bootstrap.servers')}', "
                 f"auto.offset.reset: '{self.config.get('auto.offset.reset')}') "
                 f"subscribed to topic '{self.topic}'"
             )
