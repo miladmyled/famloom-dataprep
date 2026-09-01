@@ -8,7 +8,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: 'git@github.com:your-github-username/famloom-dataprep.git'
+    repoURL: 'git@github.com:miladmyled/famloom-dataprep.git'
     targetRevision: main
     path: k8s-manifests/
   destination:
