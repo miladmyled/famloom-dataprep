@@ -31,9 +31,9 @@ spec:
           value: "1"
         - name: PYTHONIOENCODING
           value: "utf-8"
-        # Set to "true" if you need the consumer pod to automatically rewind to partition 0 offset 0 on startup
+        # Automatically rewinds partition 0 to offset 0 on boot to ensure full event backlog ingestion
         - name: KAFKA_RESET_OFFSET_ON_START
-          value: "false"
+          value: "true"
         # Injects Kafka and Azure PostgreSQL credentials
         envFrom:
         - secretRef:

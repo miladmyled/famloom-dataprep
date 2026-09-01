@@ -77,13 +77,13 @@ class EventKafkaConsumer:
 
             use_direct_assignment = os.getenv("KAFKA_DIRECT_ASSIGN", "true").lower() in ("1", "true", "yes")
             if use_direct_assignment:
-                reset_on_start = os.getenv("KAFKA_RESET_OFFSET_ON_START", "false").lower() in ("1", "true", "yes")
-                initial_offset = OFFSET_BEGINNING if reset_on_start else -1001
+                reset_on_start = os.getenv("KAFKA_RESET_OFFSET_ON_START", "true").lower() in ("1", "true", "yes")
+                initial_offset = OFFSET_BEGINNING if reset_on_start else confluent_kafka.OFFSET_STORED
                 tp = TopicPartition(self.topic, 0, initial_offset)
                 self.consumer.assign([tp])
                 logger.info(
                     f"🎯 [CONSUMER] Direct partition assignment active: topic='{self.topic}' partition=0 "
-                    f"(initial_offset={initial_offset}, reset_to_beginning={reset_on_start}). Bypassing dynamic rebalance."
+                    f"(initial_offset={initial_offset}, reset_to_beginning={reset_on_start}). Ready to consume!"
                 )
             else:
                 self.consumer.subscribe([self.topic], on_assign=on_assign, on_revoke=on_revoke)
