@@ -55,12 +55,13 @@ def get_kafka_consumer_config() -> Dict[str, Any]:
     bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
     group_id = os.getenv("KAFKA_CONSUMER_GROUP_ID", "famloom-postgres-loader")
     auto_offset_reset = os.getenv("KAFKA_AUTO_OFFSET_RESET", "earliest")
+    partition_assignment_strategy = os.getenv("KAFKA_PARTITION_ASSIGNMENT_STRATEGY", "roundrobin")
 
     config: Dict[str, Any] = {
         "bootstrap.servers": bootstrap_servers,
         "group.id": group_id,
         "auto.offset.reset": auto_offset_reset,
-        "partition.assignment.strategy": "cooperative-sticky,roundrobin",
+        "partition.assignment.strategy": partition_assignment_strategy,
         # Strictly disabled: offsets committed manually only after successful DB transactions
         "enable.auto.commit": False,
         "session.timeout.ms": int(os.getenv("KAFKA_SESSION_TIMEOUT_MS", "45000")),
