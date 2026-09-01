@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, MagicMock
 from src.consumer.event_consumer import EventKafkaConsumer
@@ -20,10 +21,14 @@ def test_consumer_configuration():
 
         assert consumer.config["enable.auto.commit"] is False
         assert consumer.config["group.id"] == "test-group"
-        mock_consumer_inst.subscribe.assert_called_once_with(["raw-events-ingestion"])
+        mock_consumer_inst.subscribe.assert_called_once()
+        call_args, call_kwargs = mock_consumer_inst.subscribe.call_args
+        assert call_args[0] == ["raw-events-ingestion"]
+        assert "on_assign" in call_kwargs
+        assert "on_revoke" in call_kwargs
 
 
-def test_process_valid_message_commits_offset():
+def test_process_valid_message_commits_offset(caplog):
     with patch("src.consumer.event_consumer.Consumer") as mock_consumer_cls, \
          patch("src.consumer.event_consumer.init_db_schema"), \
          patch("src.consumer.event_consumer.upsert_city_event") as mock_upsert:
@@ -55,14 +60,18 @@ def test_process_valid_message_commits_offset():
         mock_msg = MagicMock()
         mock_msg.error.return_value = None
         mock_msg.value.return_value = json.dumps(payload).encode("utf-8")
+        mock_msg.key.return_value = b"eb_consumer_123"
         mock_msg.topic.return_value = "raw-events-ingestion"
         mock_msg.partition.return_value = 0
         mock_msg.offset.return_value = 100
 
-        result = consumer.process_message(mock_msg)
+        with caplog.at_level(logging.INFO):
+            result = consumer.process_message(mock_msg)
 
         assert result is True
         mock_upsert.assert_called_once()
+        # Verify verbose debug metrics log appeared in telemetry
+        assert "[CONSUMER DEBUG] Received message: topic=raw-events-ingestion partition=0 offset=100 key=eb_consumer_123" in caplog.text
         # Ensure manual commit was executed with exact message
         mock_consumer_inst.commit.assert_called_once_with(message=mock_msg, asynchronous=False)
 
@@ -86,6 +95,7 @@ def test_process_poison_pill_commits_offset():
         mock_msg = MagicMock()
         mock_msg.error.return_value = None
         mock_msg.value.return_value = b"{corrupt_json_garbage: 123"
+        mock_msg.key.return_value = None
         mock_msg.topic.return_value = "raw-events-ingestion"
         mock_msg.partition.return_value = 0
         mock_msg.offset.return_value = 101
@@ -128,6 +138,7 @@ def test_database_error_skips_commit():
         mock_msg = MagicMock()
         mock_msg.error.return_value = None
         mock_msg.value.return_value = json.dumps(payload).encode("utf-8")
+        mock_msg.key.return_value = None
         mock_msg.topic.return_value = "raw-events-ingestion"
         mock_msg.partition.return_value = 0
         mock_msg.offset.return_value = 102

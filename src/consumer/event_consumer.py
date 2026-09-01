@@ -1,8 +1,8 @@
 import json
 import time
 import logging
-from typing import Any, Dict, Optional
-from confluent_kafka import Consumer, KafkaError, KafkaException
+from typing import Any, Dict, List, Optional
+from confluent_kafka import Consumer, KafkaError, KafkaException, TopicPartition
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
@@ -36,12 +36,28 @@ class EventKafkaConsumer:
         # Initialize and verify database schema contracts (TIMESTAMPTZ & columns)
         init_db_schema(self.db_pool)
 
+        # Rebalance callbacks for partition tracking diagnostics
+        def on_assign(consumer: Consumer, partitions: List[TopicPartition]) -> None:
+            for p in partitions:
+                logger.info(
+                    f"[CONSUMER REBALANCE] Assigned partition: topic={p.topic} "
+                    f"partition={p.partition} offset={p.offset}"
+                )
+
+        def on_revoke(consumer: Consumer, partitions: List[TopicPartition]) -> None:
+            for p in partitions:
+                logger.info(
+                    f"[CONSUMER REBALANCE] Revoked partition: topic={p.topic} "
+                    f"partition={p.partition}"
+                )
+
         # Initialize confluent-kafka Consumer
         try:
             self.consumer = Consumer(self.config)
-            self.consumer.subscribe([self.topic])
+            self.consumer.subscribe([self.topic], on_assign=on_assign, on_revoke=on_revoke)
             logger.info(
-                f"[CONSUMER] Initialized Consumer (Group: '{self.config.get('group.id')}') "
+                f"[CONSUMER] Initialized Consumer (Group: '{self.config.get('group.id')}', "
+                f"auto.offset.reset: '{self.config.get('auto.offset.reset')}') "
                 f"subscribed to topic '{self.topic}'"
             )
         except Exception as e:
@@ -52,9 +68,10 @@ class EventKafkaConsumer:
         """
         Processes a single Kafka message:
         1. Deserializes JSON and validates CityEvent Pydantic model.
-        2. Handles Poison Pills by logging and committing offset immediately.
-        3. Executes PostgreSQL transaction upsert.
-        4. Manually commits Kafka offset upon DB success.
+        2. Emits verbose debug telemetry (topic, partition, offset, key, size).
+        3. Handles Poison Pills by logging and committing offset immediately.
+        4. Executes PostgreSQL transaction upsert.
+        5. Manually commits Kafka offset upon DB success.
 
         Returns:
             bool: True if message processed/committed successfully, False if transient retry needed.
@@ -63,7 +80,10 @@ class EventKafkaConsumer:
         if msg.error():
             if msg.error().code() == KafkaError._PARTITION_EOF:
                 # End of partition event, not an error
-                logger.debug(f"[CONSUMER] Reached EOF at topic {msg.topic()} [{msg.partition()}] offset {msg.offset()}")
+                logger.debug(
+                    f"[CONSUMER] Reached EOF at topic {msg.topic()} "
+                    f"[{msg.partition()}] offset {msg.offset()}"
+                )
                 return True
             else:
                 logger.error(f"[CONSUMER] Kafka message error: {msg.error()}")
@@ -73,11 +93,24 @@ class EventKafkaConsumer:
         raw_value = msg.value()
         if raw_value is None:
             # Tombstone message (null payload)
-            logger.info(f"[CONSUMER] Received null payload (tombstone) at offset {msg.offset()}. Committing offset.")
+            logger.info(
+                f"[CONSUMER] Received null payload (tombstone) at partition={msg.partition()} "
+                f"offset={msg.offset()}. Committing offset."
+            )
             self.consumer.commit(message=msg, asynchronous=False)
             return True
 
         msg_str = raw_value.decode("utf-8", errors="replace")
+        msg_key = msg.key().decode("utf-8", errors="replace") if msg.key() is not None else "None"
+        msg_size = len(raw_value)
+        partition = msg.partition()
+        offset = msg.offset()
+
+        # Verbose debug log for Kubernetes telemetry tracking
+        logger.info(
+            f"[CONSUMER DEBUG] Received message: topic={msg.topic()} partition={partition} "
+            f"offset={offset} key={msg_key} size_bytes={msg_size}"
+        )
 
         # 3. Poison Pill Handling: JSON Deserialization & Pydantic Validation
         try:
@@ -87,7 +120,7 @@ class EventKafkaConsumer:
             # Poison pill detected! Log detailed context and commit offset to prevent infinite retry loops.
             logger.warning(
                 f"☣️ [POISON PILL] Corrupt message dropped at topic {msg.topic()} "
-                f"[{msg.partition()}] @ offset {msg.offset()}: {val_err}\n"
+                f"[{partition}] @ offset {offset}: {val_err}\n"
                 f"Payload snippet: {msg_str[:250]}"
             )
             # Commit offset to advance consumer past poison pill
@@ -104,14 +137,14 @@ class EventKafkaConsumer:
             self.consumer.commit(message=msg, asynchronous=False)
             logger.info(
                 f"✅ [LOADED] Event '{event.title}' (ID: {event.event_id}, City: {event.city}) "
-                f"persisted to PostgreSQL. Offset {msg.offset()} committed."
+                f"persisted to PostgreSQL. Partition {partition} offset {offset} committed."
             )
             return True
 
         except Exception as db_err:
             # Transient DB error: Do NOT commit offset so Kafka redelivers upon recovery
             logger.error(
-                f"❌ [DB ERROR] Failed to persist event '{event.event_id}' at offset {msg.offset()}: {db_err}. "
+                f"❌ [DB ERROR] Failed to persist event '{event.event_id}' at offset {offset}: {db_err}. "
                 "Offset will NOT be committed (at-least-once retry)."
             )
             return False
@@ -124,12 +157,22 @@ class EventKafkaConsumer:
         self.running = True
         logger.info(f"🚀 [CONSUMER] Starting main polling loop on topic '{self.topic}'...")
 
+        idle_polls = 0
         while self.running:
             try:
                 msg = self.consumer.poll(timeout=poll_timeout)
                 if msg is None:
+                    idle_polls += 1
+                    # Heartbeat log every 30 seconds of idle polling to confirm active polling state
+                    if idle_polls >= 30:
+                        logger.debug(
+                            f"[CONSUMER HEARTBEAT] Polling active on topic '{self.topic}'. "
+                            "Waiting for incoming messages..."
+                        )
+                        idle_polls = 0
                     continue
 
+                idle_polls = 0
                 success = self.process_message(msg)
                 if not success:
                     # Brief backoff before retrying on transient database failures

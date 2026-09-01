@@ -43,9 +43,12 @@ def get_kafka_producer_config() -> Dict[str, Any]:
 
 def get_kafka_consumer_config() -> Dict[str, Any]:
     """
-    Constructs the confluent-kafka Consumer configuration dictionary.
-    Strictly disables auto-commit ('enable.auto.commit': False) to ensure
-    at-least-once delivery with manual post-database commits.
+    Constructs the hardened confluent-kafka Consumer configuration dictionary.
+    Guarantees:
+    - Strictly disables auto-commit ('enable.auto.commit': False) to ensure
+      at-least-once delivery with manual post-database commits.
+    - Explicit 'auto.offset.reset': 'earliest' to read from beginning if no offset exists.
+    - Explicit 'session.timeout.ms': 45000 and 'max.poll.interval.ms': 300000.
     """
     bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
     group_id = os.getenv("KAFKA_CONSUMER_GROUP_ID", "famloom-postgres-loader")
