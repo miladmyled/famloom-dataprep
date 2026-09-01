@@ -8,7 +8,8 @@ from src.consumer.event_consumer import EventKafkaConsumer
 
 def test_consumer_configuration():
     with patch("src.consumer.event_consumer.Consumer") as mock_consumer_cls, \
-         patch("src.consumer.event_consumer.init_db_schema"):
+         patch("src.consumer.event_consumer.init_db_schema"), \
+         patch.dict("os.environ", {"KAFKA_DIRECT_ASSIGN": "false"}):
 
         mock_consumer_inst = MagicMock()
         mock_consumer_cls.return_value = mock_consumer_inst
@@ -29,10 +30,33 @@ def test_consumer_configuration():
         assert "on_revoke" in call_kwargs
 
 
+def test_consumer_direct_assignment_mode():
+    with patch("src.consumer.event_consumer.Consumer") as mock_consumer_cls, \
+         patch("src.consumer.event_consumer.init_db_schema"), \
+         patch.dict("os.environ", {"KAFKA_DIRECT_ASSIGN": "true", "KAFKA_RESET_OFFSET_ON_START": "true"}):
+
+        mock_consumer_inst = MagicMock()
+        mock_consumer_cls.return_value = mock_consumer_inst
+        mock_db_pool = MagicMock()
+
+        consumer = EventKafkaConsumer(
+            kafka_config={"bootstrap.servers": "localhost:9092", "group.id": "test-group", "enable.auto.commit": False},
+            topic="raw-events-ingestion",
+            db_pool=mock_db_pool,
+        )
+
+        mock_consumer_inst.assign.assert_called_once()
+        assigned_pts = mock_consumer_inst.assign.call_args[0][0]
+        assert len(assigned_pts) == 1
+        assert assigned_pts[0].topic == "raw-events-ingestion"
+        assert assigned_pts[0].partition == 0
+        assert assigned_pts[0].offset == OFFSET_BEGINNING
+
+
 def test_consumer_rebalance_on_assign_auto_reset():
     with patch("src.consumer.event_consumer.Consumer") as mock_consumer_cls, \
          patch("src.consumer.event_consumer.init_db_schema"), \
-         patch.dict("os.environ", {"KAFKA_RESET_OFFSET_ON_START": "true"}):
+         patch.dict("os.environ", {"KAFKA_DIRECT_ASSIGN": "false", "KAFKA_RESET_OFFSET_ON_START": "true"}):
 
         mock_consumer_inst = MagicMock()
         mock_consumer_cls.return_value = mock_consumer_inst
@@ -48,8 +72,6 @@ def test_consumer_rebalance_on_assign_auto_reset():
         on_assign = call_kwargs["on_assign"]
 
         partition = TopicPartition("raw-events-ingestion", 0)
-        mock_consumer_inst.committed.return_value = [TopicPartition("raw-events-ingestion", 0, 289)]
-        mock_consumer_inst.get_watermark_offsets.return_value = (0, 289)
 
         # Trigger on_assign callback
         on_assign(mock_consumer_inst, [partition])

@@ -39,43 +39,16 @@ class EventKafkaConsumer:
 
         # Rebalance callbacks for partition tracking diagnostics
         def on_assign(consumer: Consumer, partitions: List[TopicPartition]) -> None:
-            try:
-                # Query committed offsets vs. low/high watermarks for partition visibility
-                committed = consumer.committed(partitions, timeout=10.0)
-                for p, c in zip(partitions, committed):
-                    try:
-                        low, high = consumer.get_watermark_offsets(p, timeout=10.0, cached=False)
-                    except Exception:
-                        low, high = "unknown", "unknown"
-
-                    committed_offset = c.offset if c else "none"
-                    logger.info(
-                        f"[CONSUMER REBALANCE] Assigned partition: topic={p.topic} "
-                        f"partition={p.partition} committed_offset={committed_offset} "
-                        f"(watermarks: earliest={low}, latest={high})"
-                    )
-
-                # Optional automatic offset recovery: force seek to earliest on startup if requested
+            for p in partitions:
+                logger.info(f"[CONSUMER REBALANCE] Assigned partition: topic={p.topic} partition={p.partition}")
                 if os.getenv("KAFKA_RESET_OFFSET_ON_START", "false").lower() in ("1", "true", "yes"):
-                    logger.warning(
-                        "⚠️ [CONSUMER] KAFKA_RESET_OFFSET_ON_START enabled! "
-                        "Seeking all assigned partitions to OFFSET_BEGINNING."
-                    )
-                    for p in partitions:
-                        p.offset = OFFSET_BEGINNING
-                    consumer.assign(partitions)
-
-            except Exception as rebalance_err:
-                logger.warning(f"[CONSUMER REBALANCE] Error diagnosing partition offsets: {rebalance_err}")
-                for p in partitions:
-                    logger.info(f"[CONSUMER REBALANCE] Assigned partition: topic={p.topic} partition={p.partition}")
+                    p.offset = OFFSET_BEGINNING
+            consumer.assign(partitions)
 
         def on_revoke(consumer: Consumer, partitions: List[TopicPartition]) -> None:
             for p in partitions:
-                logger.info(
-                    f"[CONSUMER REBALANCE] Revoked partition: topic={p.topic} "
-                    f"partition={p.partition}"
-                )
+                logger.info(f"[CONSUMER REBALANCE] Revoked partition: topic={p.topic} partition={p.partition}")
+            consumer.unassign()
 
         # Initialize confluent-kafka Consumer
         try:
@@ -102,7 +75,20 @@ class EventKafkaConsumer:
                 )
                 raise
 
-            self.consumer.subscribe([self.topic], on_assign=on_assign, on_revoke=on_revoke)
+            use_direct_assignment = os.getenv("KAFKA_DIRECT_ASSIGN", "true").lower() in ("1", "true", "yes")
+            if use_direct_assignment:
+                reset_on_start = os.getenv("KAFKA_RESET_OFFSET_ON_START", "false").lower() in ("1", "true", "yes")
+                initial_offset = OFFSET_BEGINNING if reset_on_start else -1001
+                tp = TopicPartition(self.topic, 0, initial_offset)
+                self.consumer.assign([tp])
+                logger.info(
+                    f"🎯 [CONSUMER] Direct partition assignment active: topic='{self.topic}' partition=0 "
+                    f"(initial_offset={initial_offset}, reset_to_beginning={reset_on_start}). Bypassing dynamic rebalance."
+                )
+            else:
+                self.consumer.subscribe([self.topic], on_assign=on_assign, on_revoke=on_revoke)
+                logger.info(f"[CONSUMER] Subscribed to topic '{self.topic}' using dynamic group rebalance.")
+
             logger.info(
                 f"[CONSUMER] Initialized Consumer (Group: '{self.config.get('group.id')}', "
                 f"Brokers: '{self.config.get('bootstrap.servers')}', "
