@@ -167,15 +167,6 @@ class EventKafkaConsumer:
             with self.db_pool.connection() as conn:
                 with conn.transaction():
                     upsert_city_event(conn, event)
-
-            # 5. Manual Offset Commit (Strictly after DB transaction commit)
-            self.consumer.commit(message=msg, asynchronous=False)
-            logger.info(
-                f"✅ [LOADED] Event '{event.title}' (ID: {event.event_id}, City: {event.city}) "
-                f"persisted to PostgreSQL. Partition {partition} offset {offset} committed."
-            )
-            return True
-
         except Exception as db_err:
             # Transient DB error: Do NOT commit offset so Kafka redelivers upon recovery
             logger.error(
@@ -183,6 +174,35 @@ class EventKafkaConsumer:
                 "Offset will NOT be committed (at-least-once retry)."
             )
             return False
+
+        # 5. Manual Offset Commit (Strictly after DB transaction commit)
+        commit_success = False
+        for attempt in range(5):
+            try:
+                self.consumer.commit(message=msg, asynchronous=False)
+                commit_success = True
+                break
+            except KafkaException as ke:
+                if ke.args[0].code() == KafkaError._WAIT_COORD:
+                    logger.info(
+                        f"[KAFKA] Coordinator initializing, retrying commit for offset {offset} "
+                        f"(attempt {attempt + 1}/5)..."
+                    )
+                    time.sleep(1.0)
+                    self.consumer.poll(0)
+                else:
+                    logger.warning(f"⚠️ [KAFKA COMMIT] Offset {offset} commit deferred: {ke}")
+                    break
+            except Exception as ex:
+                logger.warning(f"⚠️ [KAFKA COMMIT] Offset {offset} commit error: {ex}")
+                break
+
+        logger.info(
+            f"✅ [LOADED] Event '{event.title}' (ID: {event.event_id}, City: {event.city}) "
+            f"persisted to PostgreSQL. Partition {partition} offset {offset} "
+            f"{'committed' if commit_success else 'stored'}."
+        )
+        return True
 
     def run(self, poll_timeout: float = 1.0) -> None:
         """
