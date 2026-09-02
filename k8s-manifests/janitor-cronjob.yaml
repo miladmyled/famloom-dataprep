@@ -20,7 +20,7 @@ spec:
         spec:
           containers:
           - name: janitor-container
-            image: famloom-dataprep:latest
+            image: ghcr.io/miladmyled/famloom-dataprep:latest
             imagePullPolicy: IfNotPresent
             command: ["python", "janitor.py"]
             env:

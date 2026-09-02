@@ -21,7 +21,7 @@ spec:
         spec:
           containers:
           - name: scraper-container
-            image: famloom-dataprep:latest
+            image: ghcr.io/miladmyled/famloom-dataprep:latest
             imagePullPolicy: IfNotPresent
             command: ["python", "main.py"]
             env:
