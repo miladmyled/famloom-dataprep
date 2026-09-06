@@ -88,3 +88,65 @@ def test_clean_and_validate_malformed_event():
 
     event = clean_and_validate_event(raw)
     assert event is None
+
+
+def test_match_interest_tags_whole_word_and_case_insensitive():
+    from src.etl.transformer import match_interest_tags
+
+    mapping = {
+        "art": 1,
+        "sports": 2,
+        "soccer": 3,
+        "martial arts": 4,
+        "music": 5,
+    }
+
+    # Test 1: "art" must NOT match "party"
+    matches_party = match_interest_tags("Kids Birthday Party at the Park", None, mapping)
+    assert 1 not in matches_party, "'art' should NOT match inside 'party'"
+
+    # Test 2: "art" matches exact whole word in title
+    matches_art = match_interest_tags("Kids Art & Painting Workshop", None, mapping)
+    assert 1 in matches_art
+
+    # Test 3: Case-insensitive matching (uppercase / mixed)
+    matches_case = match_interest_tags("YOUTH SOCCER LEAGUE", "Great SPORTS event", mapping)
+    assert 2 in matches_case  # sports from description
+    assert 3 in matches_case  # soccer from title
+
+    # Test 4: Multi-word interest label
+    matches_multi = match_interest_tags("After School Martial Arts Academy", None, mapping)
+    assert 4 in matches_multi
+
+    # Test 5: Empty text or empty mapping
+    assert match_interest_tags("", "", mapping) == []
+    assert match_interest_tags("Art and Sports", None, {}) == []
+
+
+def test_clean_and_validate_event_with_interest_tags():
+    future_date = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    raw = {
+        "event_id": "eb_tagged_1",
+        "city": "Vancouver, BC",
+        "title": "Community Youth Soccer Tournament",
+        "description": "An exciting weekend of outdoor sports and music for families.",
+        "url": "https://eventbrite.com/e/soccer-tournament",
+        "start_date": future_date,
+    }
+
+    interest_mapping = {
+        "soccer": 10,
+        "sports": 20,
+        "music": 30,
+        "art": 40,
+    }
+
+    event = clean_and_validate_event(raw, interest_tags=interest_mapping)
+    assert event is not None
+    assert event.event_id == "eb_tagged_1"
+    # Should match soccer, sports, music (10, 20, 30), but not art (40)
+    assert 10 in event.tag_ids
+    assert 20 in event.tag_ids
+    assert 30 in event.tag_ids
+    assert 40 not in event.tag_ids
+

@@ -1,5 +1,5 @@
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 
@@ -25,6 +25,7 @@ class CityEvent(BaseModel):
     location_summary: Optional[str] = Field(default=None, description="Venue name or physical address summary")
     status: str = Field(default="live", description="Event status: live, canceled, postponed")
     is_canceled: bool = Field(default=False, description="Tombstone flag for canceled events")
+    tag_ids: List[int] = Field(default_factory=list, description="Matched interest tag IDs from question_values")
 
     @property
     def date(self) -> datetime:

@@ -19,12 +19,13 @@ from src.etl.extractor import get_active_cities
 from src.etl.eventbrite import EventbriteScraper
 from src.etl.transformer import clean_and_validate_event
 from src.etl.kafka_producer import EventKafkaProducer
+from src.db.events import get_active_interests
 
 
 def run_etl_pipeline() -> int:
     """
     Main ETL Orchestration routine executed by Kubernetes CronJob.
-    1. Extracts active target cities from Azure PostgreSQL.
+    1. Extracts active target cities and active interests from Azure PostgreSQL.
     2. Initializes Confluent Kafka Producer for raw-events-ingestion topic.
     3. Scrapes external family-friendly events for each city via Eventbrite API.
     4. Validates and filters events against strict business rules (future events only, timezone-aware, 14-day window).
@@ -36,8 +37,8 @@ def run_etl_pipeline() -> int:
     logger.info("🚀 Starting Famloom Event ETL Worker (CronJob Run)")
     logger.info("==================================================")
 
-    # 1. Fetch active target cities from database
-    logger.info("[STEP 1/4] Fetching active cities from Azure PostgreSQL...")
+    # 1. Fetch active target cities and active interests from database
+    logger.info("[STEP 1/4] Fetching active cities and interests from Azure PostgreSQL...")
     try:
         active_cities: List[str] = get_active_cities()
     except Exception as db_err:
@@ -49,6 +50,10 @@ def run_etl_pipeline() -> int:
         return 0
 
     logger.info(f"📍 Found {len(active_cities)} active target cities: {active_cities}")
+
+    # Cache active interest tags in memory during scraper run
+    active_interests = get_active_interests()
+    logger.info(f"🏷️ Cached {len(active_interests)} active interest tags for enrichment.")
 
     # 2. Initialize Kafka Producer
     logger.info("[STEP 2/4] Initializing Confluent Kafka Producer...")
@@ -82,10 +87,10 @@ def run_etl_pipeline() -> int:
             # Normalize raw payloads
             normalized_events = scraper.normalize_data(raw_events)
 
-            # Transform, Validate, and Stream
+            # Transform, Validate, Enrich, and Stream
             city_queued = 0
             for raw_dict in normalized_events:
-                valid_event = clean_and_validate_event(raw_dict)
+                valid_event = clean_and_validate_event(raw_dict, interest_tags=active_interests)
 
                 if valid_event is not None:
                     metrics["valid_events"] += 1

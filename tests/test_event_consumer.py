@@ -222,3 +222,49 @@ def test_consumer_close():
 
         mock_consumer_inst.close.assert_called_once()
         mock_db_pool.close.assert_called_once()
+
+
+def test_process_message_with_tag_ids(caplog):
+    with patch("src.consumer.event_consumer.Consumer") as mock_consumer_cls, \
+         patch("src.consumer.event_consumer.init_db_schema"), \
+         patch("src.consumer.event_consumer.upsert_city_event") as mock_upsert:
+
+        mock_consumer_inst = MagicMock()
+        mock_consumer_cls.return_value = mock_consumer_inst
+        mock_db_pool = MagicMock()
+        mock_conn = MagicMock()
+        mock_db_pool.connection.return_value.__enter__.return_value = mock_conn
+
+        consumer = EventKafkaConsumer(
+            kafka_config={"bootstrap.servers": "localhost:9092", "group.id": "test-group", "enable.auto.commit": False},
+            topic="raw-events-ingestion",
+            db_pool=mock_db_pool,
+        )
+
+        future_date = (datetime.now(timezone.utc) + timedelta(days=5)).isoformat()
+        payload = {
+            "event_id": "eb_consumer_with_tags",
+            "city": "Vancouver, BC, Canada",
+            "title": "Kids Soccer & Art",
+            "url": "https://eventbrite.ca/e/soccer-art-123",
+            "start_date": future_date,
+            "tag_ids": [10, 20],
+        }
+
+        mock_msg = MagicMock()
+        mock_msg.error.return_value = None
+        mock_msg.value.return_value = json.dumps(payload).encode("utf-8")
+        mock_msg.key.return_value = b"eb_consumer_with_tags"
+        mock_msg.topic.return_value = "raw-events-ingestion"
+        mock_msg.partition.return_value = 0
+        mock_msg.offset.return_value = 105
+
+        with caplog.at_level(logging.INFO):
+            result = consumer.process_message(mock_msg)
+
+        assert result is True
+        mock_upsert.assert_called_once()
+        passed_event = mock_upsert.call_args[0][1]
+        assert passed_event.tag_ids == [10, 20]
+        assert "with 2 tags" in caplog.text
+

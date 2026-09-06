@@ -16,6 +16,7 @@ def test_upsert_city_event_sql_generation():
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
     mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+    mock_cursor.fetchone.return_value = {"id": 101}
 
     future_date = datetime.now(timezone.utc) + timedelta(days=3)
     event = CityEvent(
@@ -31,14 +32,80 @@ def test_upsert_city_event_sql_generation():
     upsert_city_event(mock_conn, event)
 
     assert mock_cursor.execute.called
-    call_args = mock_cursor.execute.call_args
+    call_args = mock_cursor.execute.call_args_list[0]
     sql = call_args[0][0]
     params = call_args[0][1]
 
     assert "INSERT INTO city_events" in sql
     assert "ON CONFLICT" in sql
     assert "DO UPDATE SET" in sql
+    assert "RETURNING id" in sql
     assert params["city"] == "Vancouver, BC"
     assert params["title"] == "Family Puppet Show"
     assert params["status"] == "live"
     assert params["is_canceled"] is False
+
+
+def test_upsert_city_event_with_tag_ids_batch_insert():
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+    mock_cursor.fetchone.return_value = {"id": 42}
+
+    future_date = datetime.now(timezone.utc) + timedelta(days=3)
+    event = CityEvent(
+        event_id="eb_sql_test_102",
+        city="Vancouver, BC",
+        title="Youth Soccer Camp",
+        url="https://eventbrite.ca/e/soccer-102",
+        start_date=future_date,
+        tag_ids=[10, 20],
+    )
+
+    result_id = upsert_city_event(mock_conn, event)
+    assert result_id == 42
+
+    # Verify batch insert for event_interest_tags
+    assert mock_cursor.executemany.called
+    tag_call_args = mock_cursor.executemany.call_args
+    tag_sql = tag_call_args[0][0]
+    tag_records = tag_call_args[0][1]
+
+    assert "INSERT INTO event_interest_tags" in tag_sql
+    assert "ON CONFLICT (event_id, question_value_id) DO NOTHING" in tag_sql
+    assert tag_records == [(42, 10), (42, 20)]
+
+
+def test_get_active_interests_success():
+    from src.db.events import get_active_interests
+
+    mock_pool = MagicMock()
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+
+    mock_pool.connection.return_value.__enter__.return_value = mock_conn
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+    mock_cursor.fetchall.return_value = [
+        {"question_value_id": 1, "label": "Sports"},
+        {"question_value_id": 2, "label": "art & crafts"},
+        {"question_value_id": 3, "label": "music"},
+    ]
+
+    result = get_active_interests(mock_pool)
+    assert result == {
+        "sports": 1,
+        "art & crafts": 2,
+        "music": 3,
+    }
+
+
+def test_get_active_interests_graceful_error_handling():
+    from src.db.events import get_active_interests
+
+    mock_pool = MagicMock()
+    mock_pool.connection.side_effect = Exception("Database Connection Refused")
+
+    # Should catch gracefully and return {} without crashing
+    result = get_active_interests(mock_pool)
+    assert result == {}
+
