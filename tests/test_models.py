@@ -129,3 +129,34 @@ def test_city_event_tombstone_canceled():
     )
     assert event.is_canceled is True
     assert event.status == "canceled"
+
+
+def test_city_event_tag_ids_default():
+    future_date = datetime.now(timezone.utc) + timedelta(days=5)
+    event = CityEvent(
+        event_id="eventbrite_notags",
+        city="Vancouver, BC",
+        title="Family Gathering",
+        url="https://eventbrite.com/e/gathering",
+        start_date=future_date,
+    )
+    assert event.tag_ids == []
+
+
+def test_city_event_with_tag_ids_serialization():
+    future_date = datetime.now(timezone.utc) + timedelta(days=5)
+    event = CityEvent(
+        event_id="eventbrite_withtags",
+        city="Vancouver, BC",
+        title="Kids Soccer and Art Camp",
+        url="https://eventbrite.com/e/soccer-art",
+        start_date=future_date,
+        tag_ids=[101, 102, 103],
+    )
+    assert event.tag_ids == [101, 102, 103]
+
+    # JSON serialization round-trip
+    dumped_json = event.model_dump_json()
+    reloaded = CityEvent.model_validate_json(dumped_json)
+    assert reloaded.tag_ids == [101, 102, 103]
+

@@ -186,8 +186,9 @@ class EventKafkaConsumer:
         except Exception as ex:
             logger.debug(f"[KAFKA COMMIT] Offset {offset} commit error: {ex}")
 
+        tag_info = f" with {len(event.tag_ids)} tags" if event.tag_ids else ""
         logger.info(
-            f"✅ [LOADED] Event '{event.title}' (ID: {event.event_id}, City: {event.city}) "
+            f"✅ [LOADED] Event '{event.title}' (ID: {event.event_id}, City: {event.city}){tag_info} "
             f"persisted to PostgreSQL. Partition {partition} offset {offset} committed."
         )
         return True

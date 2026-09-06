@@ -7,16 +7,20 @@ Tests:
 4. Poison Pill Handling Simulation
 """
 
+import os
 import sys
 import logging
 from datetime import datetime, timezone, timedelta
+
+# Ensure workspace root is in sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("PipelineTest")
 
 from src.config.database import get_db_pool
-from src.db.events import init_db_schema, upsert_city_event
+from src.db.events import init_db_schema, upsert_city_event, get_active_interests
 from src.models.event import CityEvent
 from src.etl.eventbrite import EventbriteScraper
 from src.etl.transformer import clean_and_validate_event
@@ -28,11 +32,13 @@ def run_tests():
     print("========================================================\n")
 
     # TEST 1: Database Connection & Schema Verification
-    print("[TEST 1/4] Verifying Azure PostgreSQL & Schema Contracts...")
+    print("[TEST 1/4] Verifying Azure PostgreSQL & Active Interests...")
     try:
         pool = get_db_pool()
         cols = init_db_schema(pool)
-        print(f"[SUCCESS] Azure PostgreSQL connected! Active columns: {sorted(list(cols))}\n")
+        print(f"[SUCCESS] Azure PostgreSQL connected! Active columns: {sorted(list(cols))}")
+        interests = get_active_interests(pool)
+        print(f"[SUCCESS] Active interests fetched: {len(interests)} tags found.\n")
     except Exception as e:
         print(f"[FAILED] Database connection failed: {e}\n")
         return 1
@@ -47,12 +53,13 @@ def run_tests():
         normalized = scraper.normalize_data(raw_events[:5])
         sample_event = None
         for raw in normalized:
-            sample_event = clean_and_validate_event(raw)
+            sample_event = clean_and_validate_event(raw, interest_tags=interests)
             if sample_event:
                 break
         if sample_event:
             print(f"   Sample Validated Event: '{sample_event.title}'")
             print(f"   ID: {sample_event.event_id} | Start UTC: {sample_event.start_date}")
+            print(f"   Tags: {sample_event.tag_ids}")
             print(f"   Status: {sample_event.status} | Is Canceled: {sample_event.is_canceled}\n")
     else:
         print("[INFO] Live API returned 0 events or token not configured. Using mock event.")
@@ -60,16 +67,17 @@ def run_tests():
         sample_event = clean_and_validate_event({
             "event_id": "eb_e2e_test_001",
             "city": "Vancouver, BC, Canada",
-            "title": "Vancouver Kids STEM Workshop",
+            "title": "Vancouver Kids STEM Workshop and Art",
             "url": "https://eventbrite.ca/e/vancouver-stem-workshop-001",
             "start_date": future_date,
             "status": "live",
             "is_canceled": False,
-        })
-        print(f"[SUCCESS] Mock Event Validated: {sample_event.title}\n")
+        }, interest_tags={"art": 1, "stem": 2})
+        print(f"[SUCCESS] Mock Event Validated: {sample_event.title} (Tags: {sample_event.tag_ids})\n")
 
-    # TEST 3: Idempotent Database Upsert & Tombstone Update
-    print("[TEST 3/4] Testing Idempotent Database Upsert & Status Updates...")
+    # TEST 3: Idempotent Database Upsert & Status Updates
+    print("[TEST 3/4] Testing Idempotent Database Upsert & Interest Tag Associations...")
+    test_tag_id = list(interests.values())[0] if interests else 1
     test_idempotent_event = CityEvent(
         event_id="eventbrite_test_idempotent_999",
         city="Vancouver, BC, Canada",
@@ -78,13 +86,14 @@ def run_tests():
         start_date=datetime.now(timezone.utc) + timedelta(days=5),
         status="live",
         is_canceled=False,
+        tag_ids=[test_tag_id],
     )
 
     with pool.connection() as conn:
-        # Step A: Insert initial event
-        upsert_city_event(conn, test_idempotent_event)
+        # Step A: Insert initial event with tag
+        db_id = upsert_city_event(conn, test_idempotent_event)
         conn.commit()
-        print("   [A] Initial event inserted successfully.")
+        print(f"   [A] Initial event inserted successfully (DB ID: {db_id}).")
 
         # Step B: Upsert modified event (cancellation tombstone update)
         test_idempotent_event.title = "Canceled Family Nature Walk"

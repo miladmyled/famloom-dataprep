@@ -3,11 +3,15 @@ Direct ETL Loader: Scrapes Eventbrite events for all active cities in Azure Post
 validates them with Pydantic & business rules, and performs idempotent upserts into city_events.
 """
 
+import os
 import sys
 import time
 import logging
 from typing import List
 from dotenv import load_dotenv
+
+# Ensure workspace root is in sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 load_dotenv(override=True)
 
@@ -21,7 +25,7 @@ from src.config.database import get_db_pool
 from src.etl.extractor import get_active_cities
 from src.etl.eventbrite import EventbriteScraper
 from src.etl.transformer import clean_and_validate_event
-from src.db.events import init_db_schema, upsert_city_event
+from src.db.events import init_db_schema, upsert_city_event, get_active_interests
 
 
 def load_events_for_active_cities() -> int:
@@ -36,6 +40,10 @@ def load_events_for_active_cities() -> int:
         init_db_schema(pool)
     except Exception as e:
         logger.error(f"❌ Error initializing DB schema: {e}")
+
+    # Fetch active interests for tagging
+    active_interests = get_active_interests(pool)
+    logger.info(f"🏷️ Loaded {len(active_interests)} active interest tags for enrichment.")
 
     # 2. Fetch active cities from Azure PostgreSQL
     raw_cities = get_active_cities()
@@ -68,7 +76,7 @@ def load_events_for_active_cities() -> int:
 
                 city_valid = 0
                 for raw_dict in normalized:
-                    event = clean_and_validate_event(raw_dict)
+                    event = clean_and_validate_event(raw_dict, interest_tags=active_interests)
 
                     if event is not None:
                         metrics["valid_events"] += 1
