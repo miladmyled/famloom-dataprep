@@ -24,19 +24,32 @@ class EventbriteScraper(BaseEventScraper):
 
     def __init__(
         self,
-        city: str,
+        city: Optional[Any] = None,
+        cities: Optional[List[str]] = None,
         api_token: Optional[str] = None,
         base_url: Optional[str] = None,
         max_pages: Optional[int] = None,
         timeout_seconds: Optional[int] = None,
         **kwargs: Any,
     ):
-        super().__init__(city=city, **kwargs)
+        if cities is not None:
+            self.cities: List[str] = list(cities)
+        elif isinstance(city, list):
+            self.cities = list(city)
+        elif isinstance(city, str) and city.strip():
+            self.cities = [city.strip()]
+        else:
+            env_cities = os.getenv("EVENTBRITE_CITIES", os.getenv("TARGET_CITIES", ""))
+            self.cities = [c.strip() for c in env_cities.split(",") if c.strip()]
+
+        primary_city = self.cities[0] if self.cities else (city if isinstance(city, str) else "")
+        super().__init__(city=primary_city, **kwargs)
+
         self.api_token = api_token or os.getenv("EVENTBRITE_API_TOKEN", "")
         self.base_url = (base_url or os.getenv("EVENTBRITE_API_URL", "https://www.eventbriteapi.com/v3")).rstrip("/")
 
-        # Pagination Circuit Breakers
-        self.max_pages = max_pages or int(os.getenv("EVENTBRITE_MAX_PAGES", "5"))
+        # Pagination Circuit Breakers (Default max_pages=10)
+        self.max_pages = max_pages or int(os.getenv("EVENTBRITE_MAX_PAGES", "10"))
         self.timeout_seconds = timeout_seconds or int(os.getenv("EVENTBRITE_TIMEOUT_SECONDS", "10"))
         self.max_scrape_duration_seconds = int(os.getenv("EVENTBRITE_MAX_SCRAPE_DURATION_SECONDS", "60"))
 
@@ -119,41 +132,54 @@ class EventbriteScraper(BaseEventScraper):
         logger.error(f"❌ Max retries reached for Eventbrite API request in city '{self.city}'.")
         return None
 
-    def fetch_raw_events(self) -> List[Dict[str, Any]]:
+    def _fetch_raw_events_for_city(self, target_city: str) -> List[Dict[str, Any]]:
         """
-        Fetches raw events from Eventbrite for the target city using pagination circuit breakers.
+        Fetches raw events from Eventbrite for an individual target city
+        using pagination circuit breakers, cycle detection, and source date filtering.
         """
-        if not self.api_token:
-            logger.warning(
-                f"⚠️ EVENTBRITE_API_TOKEN is not configured. Skipping live API fetch for city '{self.city}'."
-            )
-            return []
-
         endpoint = f"{self.base_url}/destination/search/"
         raw_events: List[Dict[str, Any]] = []
         page = 1
         continuation_token = None
+        seen_continuation_tokens = set()
         start_time = time.time()
 
+        # Source date filtering: start date >= CURRENT_DATE
+        now_utc = datetime.now(timezone.utc)
+        current_date_str = now_utc.strftime("%Y-%m-%d")
+        current_date_iso = now_utc.strftime("%Y-%m-%dT00:00:00Z")
+
         # Simplify city name for search query (e.g. 'Vancouver, BC, Canada' -> 'Vancouver')
-        clean_city_query = self.city.split(",")[0].strip()
+        clean_city_query = target_city.split(",")[0].strip()
         search_query = f"family {clean_city_query}"
 
-        logger.info(f"🔍 Starting Eventbrite scrape for city: '{self.city}' (Query: '{search_query}', Max Pages: {self.max_pages})")
+        logger.info(f"🔍 Starting Eventbrite scrape for city: '{target_city}' (Query: '{search_query}', Max Pages: {self.max_pages})")
 
         while page <= self.max_pages:
-            # Circuit breaker: Hard timeout guard
+            # Circuit breaker 1: Hard timeout guard
             elapsed = time.time() - start_time
             if elapsed > self.max_scrape_duration_seconds:
                 logger.warning(
                     f"⏱️ Circuit Breaker: Scrape duration ({elapsed:.1f}s) exceeded limit "
-                    f"({self.max_scrape_duration_seconds}s) for city '{self.city}'. Halting pagination."
+                    f"({self.max_scrape_duration_seconds}s) for city '{target_city}'. Halting pagination."
                 )
                 break
+
+            # Circuit breaker 2: Cycle detection on continuation token
+            if continuation_token:
+                if continuation_token in seen_continuation_tokens:
+                    logger.warning(
+                        f"🔄 Circuit Breaker: Detected pagination cycle (duplicate continuation token '{continuation_token}') "
+                        f"on page {page} for city '{target_city}'. Halting pagination."
+                    )
+                    break
+                seen_continuation_tokens.add(continuation_token)
 
             event_search_params: Dict[str, Any] = {
                 "q": search_query,
                 "dates": "current_future",
+                "start_date.range_start": current_date_iso,
+                "date_range": {"start": current_date_str},
                 "page": page,
                 "page_size": 20,
             }
@@ -164,7 +190,7 @@ class EventbriteScraper(BaseEventScraper):
 
             data = self._post_with_retry(endpoint, payload)
             if not data:
-                logger.warning(f"No response received on page {page} for city '{self.city}'. Terminating pagination.")
+                logger.warning(f"No response received on page {page} for city '{target_city}'. Terminating pagination.")
                 break
 
             # Handle Eventbrite destination search schema
@@ -175,26 +201,51 @@ class EventbriteScraper(BaseEventScraper):
                 events_page = data.get("events", []) if isinstance(data.get("events"), list) else []
 
             if not events_page:
-                logger.info(f"ℹ️ No events found on page {page} for city '{self.city}'.")
+                logger.info(f"ℹ️ No events found on page {page} for city '{target_city}'.")
                 break
 
+            # Tag each raw event with its target city for normalization
+            for ev in events_page:
+                if isinstance(ev, dict) and "_city" not in ev:
+                    ev["_city"] = target_city
+
             raw_events.extend(events_page)
-            logger.info(f"📄 Page {page}: Extracted {len(events_page)} events for '{self.city}'.")
+            logger.info(f"📄 Page {page}: Extracted {len(events_page)} events for '{target_city}'.")
 
             # Check pagination metadata
             pagination = events_data.get("pagination", {})
             total_pages = pagination.get("page_count", page)
             has_more = pagination.get("has_more_items", False) or (page < total_pages)
-            continuation_token = pagination.get("continuation")
+            next_continuation = pagination.get("continuation")
 
             if not has_more or page >= total_pages:
-                logger.info(f"🏁 Reached last available page ({page}/{total_pages}) for city '{self.city}'.")
+                logger.info(f"🏁 Reached last available page ({page}/{total_pages}) for city '{target_city}'.")
                 break
 
+            continuation_token = next_continuation
             page += 1
 
-        logger.info(f"✅ Total raw events fetched for '{self.city}': {len(raw_events)}")
+        logger.info(f"✅ Total raw events fetched for '{target_city}': {len(raw_events)}")
         return raw_events
+
+    def fetch_raw_events(self) -> List[Dict[str, Any]]:
+        """
+        Fetches raw events from Eventbrite for the configured target city or cities
+        using pagination circuit breakers, cycle detection, and date filtering at the source.
+        """
+        target_cities = self.cities if self.cities else ([self.city] if self.city else [])
+        if not self.api_token:
+            logger.warning(
+                f"⚠️ EVENTBRITE_API_TOKEN is not configured. Skipping live API fetch for city/cities: {target_cities}."
+            )
+            return []
+
+        all_events: List[Dict[str, Any]] = []
+        for city_name in target_cities:
+            events = self._fetch_raw_events_for_city(city_name)
+            all_events.extend(events)
+
+        return all_events
 
     def normalize_data(self, raw_events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -300,9 +351,10 @@ class EventbriteScraper(BaseEventScraper):
                 status = "live"
                 is_canceled = False
 
+            event_city = raw.get("_city") or raw.get("city") or self.city
             normalized_dict = {
                 "event_id": event_id,
-                "city": self.city,
+                "city": event_city,
                 "title": title,
                 "source": "Eventbrite",
                 "url": url,

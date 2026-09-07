@@ -160,3 +160,22 @@ def test_city_event_with_tag_ids_serialization():
     reloaded = CityEvent.model_validate_json(dumped_json)
     assert reloaded.tag_ids == [101, 102, 103]
 
+
+def test_city_event_timezone_leeway_few_hours_difference():
+    """
+    Asserts that an event occurring a few hours before current UTC date
+    (e.g., in a western timezone such as PDT UTC-7 where local time is still today
+    or within the 14-hour grace window) passes validation cleanly without false poison pill drops.
+    """
+    leeway_date = datetime.now(timezone.utc) - timedelta(hours=6)
+    event = CityEvent(
+        event_id="eventbrite_tz_leeway",
+        city="Vancouver, BC",
+        title="Evening Family Concert",
+        url="https://eventbrite.com/e/concert-tz",
+        start_date=leeway_date,
+    )
+    assert event.event_id == "eventbrite_tz_leeway"
+    assert event.start_date.tzinfo == timezone.utc
+
+

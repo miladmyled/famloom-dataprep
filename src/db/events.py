@@ -177,6 +177,11 @@ def upsert_city_event(conn: Connection, event: CityEvent) -> Optional[int]:
         "date = EXCLUDED.date",
         "updated_at = NOW()",
     ]
+    where_conditions = [
+        "city_events.title IS DISTINCT FROM EXCLUDED.title",
+        "city_events.source IS DISTINCT FROM EXCLUDED.source",
+        "city_events.date IS DISTINCT FROM EXCLUDED.date",
+    ]
 
     params: Dict[str, Any] = {
         "city": event.city,
@@ -202,47 +207,57 @@ def upsert_city_event(conn: Connection, event: CityEvent) -> Optional[int]:
         fields.append("start_date")
         values_placeholders.append("%(start_date)s")
         update_assignments.append("start_date = EXCLUDED.start_date")
+        where_conditions.append("city_events.start_date IS DISTINCT FROM EXCLUDED.start_date")
         params["start_date"] = event.start_date
 
     if "end_date" in cols:
         fields.append("end_date")
         values_placeholders.append("%(end_date)s")
         update_assignments.append("end_date = EXCLUDED.end_date")
+        where_conditions.append("city_events.end_date IS DISTINCT FROM EXCLUDED.end_date")
         params["end_date"] = event.end_date
 
     if "status" in cols:
         fields.append("status")
         values_placeholders.append("%(status)s")
         update_assignments.append("status = EXCLUDED.status")
+        where_conditions.append("city_events.status IS DISTINCT FROM EXCLUDED.status")
         params["status"] = event.status
 
     if "is_canceled" in cols:
         fields.append("is_canceled")
         values_placeholders.append("%(is_canceled)s")
         update_assignments.append("is_canceled = EXCLUDED.is_canceled")
+        where_conditions.append("city_events.is_canceled IS DISTINCT FROM EXCLUDED.is_canceled")
         params["is_canceled"] = event.is_canceled
 
     if "description" in cols:
         fields.append("description")
         values_placeholders.append("%(description)s")
         update_assignments.append("description = COALESCE(EXCLUDED.description, city_events.description)")
+        where_conditions.append("city_events.description IS DISTINCT FROM COALESCE(EXCLUDED.description, city_events.description)")
         params["description"] = event.description
 
     if "location_summary" in cols:
         fields.append("location_summary")
         values_placeholders.append("%(location_summary)s")
         update_assignments.append("location_summary = COALESCE(EXCLUDED.location_summary, city_events.location_summary)")
+        where_conditions.append("city_events.location_summary IS DISTINCT FROM COALESCE(EXCLUDED.location_summary, city_events.location_summary)")
         params["location_summary"] = event.location_summary
 
     if "created_at" in cols:
         fields.append("created_at")
         values_placeholders.append("NOW()")
 
+    where_clause = " OR\n            ".join(where_conditions)
+
     sql = f"""
         INSERT INTO city_events ({', '.join(fields)})
         VALUES ({', '.join(values_placeholders)})
         ON CONFLICT ({conflict_target}) DO UPDATE SET
             {', '.join(update_assignments)}
+        WHERE
+            {where_clause}
         RETURNING id;
     """
 
@@ -260,9 +275,12 @@ def upsert_city_event(conn: Connection, event: CityEvent) -> Optional[int]:
                 except (KeyError, TypeError, IndexError):
                     pass
 
-        # Fallback to query id if RETURNING id wasn't captured
+        # Fallback to query id if RETURNING id wasn't captured (e.g. update skipped by WHERE clause)
         if db_event_id is None:
-            cursor.execute("SELECT id FROM city_events WHERE url = %(url)s;", {"url": str(event.url)})
+            cursor.execute(
+                f"SELECT id FROM city_events WHERE {conflict_target} = %(conflict_val)s LIMIT 1;",
+                {"conflict_val": params.get(conflict_target, str(event.url))},
+            )
             lookup_row = cursor.fetchone()
             if lookup_row is not None:
                 db_event_id = lookup_row["id"] if isinstance(lookup_row, dict) else lookup_row[0]
