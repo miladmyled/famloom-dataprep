@@ -116,3 +116,133 @@ def test_rate_limit_retry_handling():
         assert events[0]["id"] == "ev_retry"
         assert mock_post.call_count == 2
         mock_sleep.assert_called_once_with(2.0)
+
+
+def test_pagination_iteration_until_blank_page():
+    scraper = EventbriteScraper(city="Vancouver, BC", api_token="valid_token", max_pages=5)
+
+    # Page 1: 2 items, continuation "tok_p2"
+    page1_data = {
+        "events": {
+            "results": [{"id": "ev_1", "name": "Event 1", "url": "https://eb.com/1"}],
+            "pagination": {"has_more_items": True, "page_count": 3, "continuation": "tok_p2"},
+        }
+    }
+    # Page 2: 2 items, continuation "tok_p3"
+    page2_data = {
+        "events": {
+            "results": [{"id": "ev_2", "name": "Event 2", "url": "https://eb.com/2"}],
+            "pagination": {"has_more_items": True, "page_count": 3, "continuation": "tok_p3"},
+        }
+    }
+    # Page 3: Blank/empty results
+    page3_data = {
+        "events": {
+            "results": [],
+            "pagination": {"has_more_items": False, "page_count": 3},
+        }
+    }
+
+    with patch("requests.post") as mock_post:
+        resp1 = MagicMock(status_code=200, json=lambda: page1_data)
+        resp2 = MagicMock(status_code=200, json=lambda: page2_data)
+        resp3 = MagicMock(status_code=200, json=lambda: page3_data)
+        mock_post.side_effect = [resp1, resp2, resp3]
+
+        events = scraper.fetch_raw_events()
+
+        assert len(events) == 2
+        assert events[0]["id"] == "ev_1"
+        assert events[1]["id"] == "ev_2"
+        assert mock_post.call_count == 3
+
+        # Verify page numbers and continuation tokens passed in payloads
+        call1_payload = mock_post.call_args_list[0][1]["json"]["event_search"]
+        assert call1_payload["page"] == 1
+        assert "continuation" not in call1_payload
+
+        call2_payload = mock_post.call_args_list[1][1]["json"]["event_search"]
+        assert call2_payload["page"] == 2
+        assert call2_payload["continuation"] == "tok_p2"
+
+        call3_payload = mock_post.call_args_list[2][1]["json"]["event_search"]
+        assert call3_payload["page"] == 3
+        assert call3_payload["continuation"] == "tok_p3"
+
+
+def test_pagination_cycle_detection_circuit_breaker():
+    scraper = EventbriteScraper(city="Richmond, BC", api_token="valid_token", max_pages=10)
+
+    # API loops back with duplicate continuation token
+    loop_page_data = {
+        "events": {
+            "results": [{"id": "ev_loop", "name": "Loop Event", "url": "https://eb.com/loop"}],
+            "pagination": {"has_more_items": True, "page_count": 100, "continuation": "repeat_token"},
+        }
+    }
+
+    with patch("requests.post") as mock_post:
+        mock_resp = MagicMock(status_code=200, json=lambda: loop_page_data)
+        mock_post.return_value = mock_resp
+
+        events = scraper.fetch_raw_events()
+
+        # Should halt on duplicate continuation token on page 3 (making only 2 calls, not looping to 10)
+        assert mock_post.call_count == 2
+        assert len(events) == 2
+
+
+def test_source_date_filtering_parameters():
+    scraper = EventbriteScraper(city="Vancouver, BC", api_token="valid_token", max_pages=1)
+
+    mock_resp_data = {
+        "events": {
+            "results": [{"id": "ev_date_check", "name": "Date Check", "url": "https://eb.com/date"}],
+            "pagination": {"has_more_items": False, "page_count": 1},
+        }
+    }
+
+    with patch("requests.post") as mock_post:
+        mock_post.return_value = MagicMock(status_code=200, json=lambda: mock_resp_data)
+
+        scraper.fetch_raw_events()
+
+        payload = mock_post.call_args[1]["json"]["event_search"]
+        assert "start_date.range_start" in payload
+        assert "date_range" in payload
+        assert payload["dates"] == "current_future"
+        assert payload["start_date.range_start"].endswith("T00:00:00Z")
+
+
+def test_multi_city_dynamic_support():
+    scraper = EventbriteScraper(cities=["Vancouver, BC", "Burnaby, BC"], api_token="valid_token", max_pages=1)
+
+    vanc_data = {
+        "events": {
+            "results": [{"id": "vanc_1", "name": "Vancouver Event", "url": "https://eb.com/vanc"}],
+            "pagination": {"has_more_items": False, "page_count": 1},
+        }
+    }
+    burn_data = {
+        "events": {
+            "results": [{"id": "burn_1", "name": "Burnaby Event", "url": "https://eb.com/burn"}],
+            "pagination": {"has_more_items": False, "page_count": 1},
+        }
+    }
+
+    with patch("requests.post") as mock_post:
+        resp_vanc = MagicMock(status_code=200, json=lambda: vanc_data)
+        resp_burn = MagicMock(status_code=200, json=lambda: burn_data)
+        mock_post.side_effect = [resp_vanc, resp_burn]
+
+        raw_events = scraper.fetch_raw_events()
+
+        assert len(raw_events) == 2
+        assert mock_post.call_count == 2
+        assert raw_events[0]["_city"] == "Vancouver, BC"
+        assert raw_events[1]["_city"] == "Burnaby, BC"
+
+        normalized = scraper.normalize_data(raw_events)
+        assert normalized[0]["city"] == "Vancouver, BC"
+        assert normalized[1]["city"] == "Burnaby, BC"
+
