@@ -39,11 +39,50 @@ def test_upsert_city_event_sql_generation():
     assert "INSERT INTO city_events" in sql
     assert "ON CONFLICT" in sql
     assert "DO UPDATE SET" in sql
+    assert "WHERE" in sql
+    assert "IS DISTINCT FROM" in sql
     assert "RETURNING id" in sql
     assert params["city"] == "Vancouver, BC"
     assert params["title"] == "Family Puppet Show"
     assert params["status"] == "live"
     assert params["is_canceled"] is False
+
+
+def test_upsert_city_event_duplicate_data_skips_update_and_uses_fallback_lookup():
+    """
+    Verifies that when duplicate data matches existing row,
+    PostgreSQL WHERE clause skips update (returning no id from INSERT),
+    and the fallback SELECT lookup retrieves the existing id without crashing or re-writing.
+    """
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+    # First fetchone (INSERT ... RETURNING id) returns None because update was skipped
+    # Second fetchone (SELECT id FROM city_events ...) returns existing row id 205
+    mock_cursor.fetchone.side_effect = [None, {"id": 205}]
+
+    future_date = datetime.now(timezone.utc) + timedelta(days=2)
+    event = CityEvent(
+        event_id="eb_sql_dup_205",
+        city="Vancouver, BC",
+        title="Duplicate Event Title",
+        url="https://eventbrite.ca/e/dup-205",
+        start_date=future_date,
+        status="live",
+        is_canceled=False,
+    )
+
+    result_id = upsert_city_event(mock_conn, event)
+    assert result_id == 205
+    assert mock_cursor.execute.call_count == 2
+
+    # Verify fallback lookup query
+    fallback_call = mock_cursor.execute.call_args_list[1]
+    fallback_sql = fallback_call[0][0]
+    fallback_params = fallback_call[0][1]
+    assert "SELECT id FROM city_events WHERE" in fallback_sql
+    assert fallback_params["conflict_val"] == "eb_sql_dup_205"
+
 
 
 def test_upsert_city_event_with_tag_ids_batch_insert():

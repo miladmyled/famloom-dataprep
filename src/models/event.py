@@ -76,17 +76,22 @@ class CityEvent(BaseModel):
     def validate_date_window(cls, v: datetime) -> datetime:
         """
         Strict Business Rule: Enforce a strict 14-day rolling ingestion window.
-        1. Automatically drop any event where start_date is strictly before CURRENT_DATE (in UTC).
+        1. Automatically drop any event where start_date is strictly before CURRENT_DATE,
+           allowing a 14-hour timezone grace window so valid events scheduled in western
+           timezones (e.g., PDT/PST UTC-7/UTC-8) are not falsely rejected when UTC midnight rolls over.
         2. Automatically drop any event where start_date is strictly greater than CURRENT_DATE + 14 days (in UTC).
         Only events scheduled for today through today + 14 days survive.
         """
-        current_utc_date = datetime.now(timezone.utc).date()
+        now_utc = datetime.now(timezone.utc)
+        current_utc_date = now_utc.date()
+        min_allowed_date = (now_utc - timedelta(hours=14)).date()
         max_utc_date = current_utc_date + timedelta(days=14)
 
-        if v.date() < current_utc_date:
+        if v.date() < min_allowed_date:
             raise ValueError(
                 f"Event start_date '{v.isoformat()}' (date: {v.date()}) is strictly before "
-                f"CURRENT_DATE '{current_utc_date}'. Event falls outside the 14-day ingestion window."
+                f"CURRENT_DATE '{current_utc_date}' (min allowed with timezone leeway: '{min_allowed_date}'). "
+                f"Event falls outside the 14-day ingestion window."
             )
         if v.date() > max_utc_date:
             raise ValueError(
