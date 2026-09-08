@@ -24,6 +24,7 @@ logger = logging.getLogger("DirectDBLoader")
 from src.config.database import get_db_pool
 from src.etl.extractor import get_active_cities
 from src.etl.eventbrite import EventbriteScraper
+from src.etl.meetup_public import MeetupExtractor
 from src.etl.transformer import clean_and_validate_event
 from src.db.events import init_db_schema, upsert_city_event, get_active_interests
 
@@ -60,27 +61,31 @@ def load_events_for_active_cities() -> int:
         "dropped_events": 0,
     }
 
+    scrapers = []
+    for city in active_cities:
+        scrapers.append((f"Eventbrite [{city}]", EventbriteScraper(city=city, max_pages=2)))
+    scrapers.append(("Meetup [Coquitlam, BC]", MeetupExtractor(city="Coquitlam, BC")))
+
     try:
         with pool.connection() as conn:
-            for city in active_cities:
+            for name, scraper in scrapers:
                 logger.info(f"\n--------------------------------------------------")
-                logger.info(f"🏙️  Processing City: '{city}'")
+                logger.info(f"🏙️  Processing: '{name}'")
                 logger.info(f"--------------------------------------------------")
 
-                scraper = EventbriteScraper(city=city, max_pages=2)
                 raw_events = scraper.fetch_raw_events()
                 metrics["raw_events_scraped"] += len(raw_events)
 
                 normalized = scraper.normalize_data(raw_events)
-                logger.info(f"Normalized {len(normalized)} raw event payloads for '{city}'.")
+                logger.info(f"Normalized {len(normalized)} raw event payloads for '{name}'.")
 
-                city_valid = 0
+                task_valid = 0
                 for raw_dict in normalized:
                     event = clean_and_validate_event(raw_dict, interest_tags=active_interests)
 
                     if event is not None:
                         metrics["valid_events"] += 1
-                        city_valid += 1
+                        task_valid += 1
                         try:
                             upsert_city_event(conn, event)
                             conn.commit()
@@ -92,8 +97,9 @@ def load_events_for_active_cities() -> int:
                     else:
                         metrics["dropped_events"] += 1
 
-                logger.info(f"✅ City '{city}': Successfully validated & upserted {city_valid} events.")
+                logger.info(f"✅ '{name}': Successfully validated & upserted {task_valid} events.")
                 metrics["cities_processed"] += 1
+
 
     except Exception as e:
         logger.error(f"❌ Pipeline error during database load: {e}", exc_info=True)
