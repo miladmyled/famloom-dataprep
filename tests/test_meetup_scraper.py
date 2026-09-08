@@ -18,7 +18,7 @@ def test_base_extractor_alias():
 def test_meetup_extractor_init_defaults():
     extractor = MeetupExtractor()
     assert extractor.city == "Coquitlam, BC"
-    assert "coquitlam" in extractor.target_url
+    assert "coquitlam" in extractor.target_url.lower()
     assert extractor.headless is True
 
 

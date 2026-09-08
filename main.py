@@ -135,13 +135,11 @@ def run_etl_pipeline() -> int:
     metrics_lock = threading.Lock()
     unflushed = 0
 
-    # Build list of scraper tasks: Eventbrite for each active city, Meetup for regional activities pool
+    # Build list of scraper tasks: Eventbrite and Meetup for each active city
     scraper_tasks: List[Tuple[str, BaseEventScraper]] = []
     for city in active_cities:
         scraper_tasks.append((f"EventbriteScraper[{city}]", EventbriteScraper(city=city)))
-
-    # Initial Meetup scraper targeting Coquitlam regional pool
-    scraper_tasks.append(("MeetupExtractor[Coquitlam]", MeetupExtractor(city="Coquitlam, BC")))
+        scraper_tasks.append((f"MeetupExtractor[{city}]", MeetupExtractor(city=city)))
 
     try:
         max_workers = min(8, max(len(scraper_tasks), 1))

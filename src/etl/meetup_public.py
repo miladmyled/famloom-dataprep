@@ -3,6 +3,7 @@ import re
 import json
 import logging
 from typing import Any, Dict, List, Optional
+import urllib.parse
 from dotenv import load_dotenv
 
 from src.etl.base import BaseExtractor
@@ -19,10 +20,6 @@ class MeetupExtractor(BaseExtractor):
     Event data into the standard CityEvent schema.
     """
 
-    DEFAULT_COQUITLAM_URL = (
-        "https://www.meetup.com/find/?location=ca--bc--coquitlam&source=EVENTS"
-    )
-
     def __init__(
         self,
         city: str = "Coquitlam, BC",
@@ -32,9 +29,17 @@ class MeetupExtractor(BaseExtractor):
         **kwargs: Any,
     ):
         super().__init__(city=city, **kwargs)
-        self.target_url = target_url or os.getenv("MEETUP_TARGET_URL", self.DEFAULT_COQUITLAM_URL)
+        if target_url:
+            self.target_url = target_url
+        elif os.getenv("MEETUP_TARGET_URL"):
+            self.target_url = os.getenv("MEETUP_TARGET_URL")
+        else:
+            clean_city = re.sub(r",\s*(Canada|USA|US)$", "", self.city, flags=re.IGNORECASE).strip()
+            encoded_city = urllib.parse.quote(clean_city)
+            self.target_url = f"https://www.meetup.com/find/?location={encoded_city}&source=EVENTS"
         self.headless = headless
         self.timeout_ms = timeout_seconds * 1000
+
 
     def fetch_raw_events(self) -> List[Dict[str, Any]]:
         """
