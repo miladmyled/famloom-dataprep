@@ -173,9 +173,11 @@ class MeetupExtractor(BaseExtractor):
                 elif "rescheduled" in status_raw:
                     status = "postponed"
 
+                event_city = self._resolve_event_city(raw)
+
                 normalized_event = {
                     "event_id": event_id,
-                    "city": self.city,
+                    "city": event_city,
                     "title": title,
                     "source": "Meetup",
                     "url": url,
@@ -193,6 +195,34 @@ class MeetupExtractor(BaseExtractor):
                 logger.error(f"❌ [MeetupExtractor] Error normalizing raw Meetup event: {err}", exc_info=True)
 
         return normalized
+
+    def _resolve_event_city(self, raw_event: Dict[str, Any]) -> str:
+        """
+        Determines the true city for an event from its Schema.org location address,
+        falling back to self.city if not explicitly specified.
+        """
+        has_country = "canada" in self.city.lower() or "usa" in self.city.lower()
+        suffix = ", Canada" if has_country else ""
+
+        loc = raw_event.get("location")
+        if isinstance(loc, dict):
+            addr = loc.get("address")
+            if isinstance(addr, dict):
+                locality = addr.get("addressLocality")
+                region = addr.get("addressRegion", "BC")
+                # Exclude country placeholders like 'Canada' in addressLocality
+                if locality and str(locality).strip().lower() not in ["canada", "usa", "us"]:
+                    locality_clean = str(locality).strip()
+                    return f"{locality_clean}, {region}{suffix}"
+
+                # Check streetAddress for known municipalities
+                street = str(addr.get("streetAddress", ""))
+                for known in ["Vancouver", "Coquitlam", "Burnaby", "Richmond", "Surrey", "Toronto"]:
+                    if re.search(rf"\b{known}\b", street, re.IGNORECASE):
+                        return f"{known}, {region}{suffix}"
+        return self.city
+
+
 
     def _format_location_summary(self, location_data: Any) -> Optional[str]:
         """
