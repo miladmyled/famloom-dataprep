@@ -270,7 +270,7 @@ def test_meetup_extractor_fetch_raw_events_mocked():
     mock_sync_pw.__enter__.return_value = mock_playwright
 
     with patch("playwright.sync_api.sync_playwright", return_value=mock_sync_pw):
-        extractor = MeetupExtractor(max_scrolls=2)
+        extractor = MeetupExtractor(max_scrolls=2, use_graphql=False)
         raw_events = extractor.fetch_raw_events()
 
         assert len(raw_events) == 1
@@ -280,3 +280,71 @@ def test_meetup_extractor_fetch_raw_events_mocked():
         )
         assert mock_page.evaluate.call_count >= 1
         mock_browser.close.assert_called_once()
+
+
+def test_meetup_extractor_resolve_coordinates():
+    extractor_coq = MeetupExtractor(city="Coquitlam, BC")
+    lat, lon = extractor_coq.resolve_coordinates()
+    assert round(lat, 2) == 49.28
+    assert round(lon, 2) == -122.79
+
+    extractor_nyc = MeetupExtractor(city="New York, NY")
+    lat_ny, lon_ny = extractor_nyc.resolve_coordinates()
+    assert round(lat_ny, 2) == 40.71
+    assert round(lon_ny, 2) == -74.01
+
+
+def test_meetup_extractor_fetch_raw_events_graphql_mocked():
+    mock_gql_response = {
+        "data": {
+            "result": {
+                "edges": [
+                    {
+                        "node": {
+                            "id": "11223344",
+                            "title": "Brooklyn Tech & AI Meetup",
+                            "dateTime": "2026-09-25T18:00:00-04:00",
+                            "eventUrl": "https://www.meetup.com/brooklyn-tech/events/11223344/",
+                            "venue": {
+                                "name": "DUMBO Tech Loft",
+                                "address": "100 Front St",
+                                "city": "Brooklyn",
+                                "state": "NY",
+                                "country": "USA",
+                            },
+                        }
+                    }
+                ],
+                "pageInfo": {"hasNextPage": False, "endCursor": None},
+            }
+        }
+    }
+
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = json.dumps(mock_gql_response).encode("utf-8")
+    mock_resp.__enter__.return_value = mock_resp
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        extractor = MeetupExtractor(city="New York, NY", use_graphql=True, max_events=10)
+        raw_events = extractor.fetch_raw_events()
+
+        assert len(raw_events) == 1
+        assert raw_events[0]["title"] == "Brooklyn Tech & AI Meetup"
+        assert raw_events[0]["id"] == "11223344"
+
+        normalized = extractor.normalize_data(raw_events)
+        assert len(normalized) == 1
+        assert normalized[0]["event_id"] == "meetup_11223344"
+        assert "Brooklyn" in normalized[0]["city"]
+        assert "NY" in normalized[0]["city"]
+
+
+def test_meetup_extractor_resolve_event_city_us_and_ca():
+    extractor_ca = MeetupExtractor(city="Coquitlam, BC, Canada")
+    city_ca = extractor_ca._resolve_event_city({"venue": {"city": "Port Coquitlam", "state": "BC"}})
+    assert city_ca == "Port Coquitlam, BC, Canada"
+
+    extractor_us = MeetupExtractor(city="New York, NY, USA")
+    city_us = extractor_us._resolve_event_city({"venue": {"city": "New York", "state": "NY"}})
+    assert city_us == "New York, NY, USA"
+
