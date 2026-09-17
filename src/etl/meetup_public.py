@@ -72,7 +72,17 @@ class MeetupExtractor(BaseExtractor):
 
         try:
             with sync_playwright() as p:
-                browser = p.chromium.launch(headless=self.headless)
+                launch_args = (
+                    [
+                        "--disable-dev-shm-usage",
+                        "--no-sandbox",
+                        "--disable-gpu",
+                        "--disable-setuid-sandbox",
+                    ]
+                    if os.name != "nt"
+                    else None
+                )
+                browser = p.chromium.launch(headless=self.headless, args=launch_args)
                 context = browser.new_context(
                     user_agent=(
                         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -81,6 +91,19 @@ class MeetupExtractor(BaseExtractor):
                     viewport={"width": 1280, "height": 900},
                 )
                 page = context.new_page()
+
+                # Abort unnecessary heavy assets (images, fonts, media) to optimize memory and network throughput
+                try:
+                    page.route(
+                        "**/*",
+                        lambda route: (
+                            route.abort()
+                            if route.request.resource_type in ["image", "media", "font"]
+                            else route.continue_()
+                        ),
+                    )
+                except Exception:
+                    pass
 
                 # Response listener to capture dynamic GraphQL responses
                 def _handle_response(response: Any) -> None:
@@ -105,10 +128,10 @@ class MeetupExtractor(BaseExtractor):
 
                 page.on("response", _handle_response)
 
-                # 1. Initial page navigation
+                # 1. Initial page navigation using domcontentloaded for fast HTML/SSR load
                 try:
-                    page.goto(self.target_url, timeout=self.timeout_ms)
-                    page.wait_for_load_state("networkidle", timeout=self.timeout_ms)
+                    page.goto(self.target_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
+                    page.wait_for_timeout(2000)
                 except Exception as nav_err:
                     logger.warning(f"⚠️ [MeetupExtractor] Navigation wait encountered: {nav_err}. Continuing...")
 
