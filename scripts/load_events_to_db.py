@@ -64,7 +64,7 @@ def load_events_for_active_cities() -> int:
     scrapers = []
     for city in active_cities:
         scrapers.append((f"Eventbrite [{city}]", EventbriteScraper(city=city, max_pages=2)))
-    scrapers.append(("Meetup [Coquitlam, BC]", MeetupExtractor(city="Coquitlam, BC")))
+        scrapers.append((f"Meetup [{city}]", MeetupExtractor(city=city)))
 
     try:
         with pool.connection() as conn:

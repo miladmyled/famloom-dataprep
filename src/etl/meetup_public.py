@@ -3,6 +3,7 @@ import re
 import json
 import logging
 from typing import Any, Dict, List, Optional
+import urllib.parse
 from dotenv import load_dotenv
 
 from src.etl.base import BaseExtractor
@@ -19,10 +20,6 @@ class MeetupExtractor(BaseExtractor):
     Event data into the standard CityEvent schema.
     """
 
-    DEFAULT_COQUITLAM_URL = (
-        "https://www.meetup.com/find/?location=ca--bc--coquitlam&source=EVENTS"
-    )
-
     def __init__(
         self,
         city: str = "Coquitlam, BC",
@@ -32,9 +29,17 @@ class MeetupExtractor(BaseExtractor):
         **kwargs: Any,
     ):
         super().__init__(city=city, **kwargs)
-        self.target_url = target_url or os.getenv("MEETUP_TARGET_URL", self.DEFAULT_COQUITLAM_URL)
+        if target_url:
+            self.target_url = target_url
+        elif os.getenv("MEETUP_TARGET_URL"):
+            self.target_url = os.getenv("MEETUP_TARGET_URL")
+        else:
+            clean_city = re.sub(r",\s*(Canada|USA|US)$", "", self.city, flags=re.IGNORECASE).strip()
+            encoded_city = urllib.parse.quote(clean_city)
+            self.target_url = f"https://www.meetup.com/find/?location={encoded_city}&source=EVENTS"
         self.headless = headless
         self.timeout_ms = timeout_seconds * 1000
+
 
     def fetch_raw_events(self) -> List[Dict[str, Any]]:
         """
@@ -168,9 +173,11 @@ class MeetupExtractor(BaseExtractor):
                 elif "rescheduled" in status_raw:
                     status = "postponed"
 
+                event_city = self._resolve_event_city(raw)
+
                 normalized_event = {
                     "event_id": event_id,
-                    "city": self.city,
+                    "city": event_city,
                     "title": title,
                     "source": "Meetup",
                     "url": url,
@@ -188,6 +195,34 @@ class MeetupExtractor(BaseExtractor):
                 logger.error(f"❌ [MeetupExtractor] Error normalizing raw Meetup event: {err}", exc_info=True)
 
         return normalized
+
+    def _resolve_event_city(self, raw_event: Dict[str, Any]) -> str:
+        """
+        Determines the true city for an event from its Schema.org location address,
+        falling back to self.city if not explicitly specified.
+        """
+        has_country = "canada" in self.city.lower() or "usa" in self.city.lower()
+        suffix = ", Canada" if has_country else ""
+
+        loc = raw_event.get("location")
+        if isinstance(loc, dict):
+            addr = loc.get("address")
+            if isinstance(addr, dict):
+                locality = addr.get("addressLocality")
+                region = addr.get("addressRegion", "BC")
+                # Exclude country placeholders like 'Canada' in addressLocality
+                if locality and str(locality).strip().lower() not in ["canada", "usa", "us"]:
+                    locality_clean = str(locality).strip()
+                    return f"{locality_clean}, {region}{suffix}"
+
+                # Check streetAddress for known municipalities
+                street = str(addr.get("streetAddress", ""))
+                for known in ["Vancouver", "Coquitlam", "Burnaby", "Richmond", "Surrey", "Toronto"]:
+                    if re.search(rf"\b{known}\b", street, re.IGNORECASE):
+                        return f"{known}, {region}{suffix}"
+        return self.city
+
+
 
     def _format_location_summary(self, location_data: Any) -> Optional[str]:
         """

@@ -172,6 +172,7 @@ def upsert_city_event(conn: Connection, event: CityEvent) -> Optional[int]:
     fields = []
     values_placeholders = []
     update_assignments = [
+        "city = EXCLUDED.city",
         "title = EXCLUDED.title",
         "source = EXCLUDED.source",
         "date = EXCLUDED.date",
