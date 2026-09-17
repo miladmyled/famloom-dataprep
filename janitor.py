@@ -13,21 +13,35 @@ logging.basicConfig(
 )
 logger = logging.getLogger("JanitorWorker")
 
-# Legacy DatabaseJanitor has been removed
-# from src.db.janitor import DatabaseJanitor
+from src.db.janitor import DatabaseJanitor
 
 
 def run_janitor() -> int:
     """
     Main entrypoint for the PostgreSQL Event Janitor CronJob.
-    Deprecated and scheduled for decommissioning.
+    Purges past single-day and multi-day events from city_events and logs telemetry.
     """
     logger.info("==================================================")
-    logger.info("⚠️ Legacy Event Janitor is deprecated and inactive.")
+    logger.info("[START] Famloom Event Janitor (Daily Cleanup Run)")
     logger.info("==================================================")
-    return 0
+
+    janitor = None
+    try:
+        janitor = DatabaseJanitor()
+        purged_count = janitor.purge_expired_events()
+        logger.info(f"[SUCCESS] Janitor execution finished successfully. Total events purged: {purged_count}")
+        return 0
+
+    except Exception as err:
+        logger.error(f"[ERROR] Fatal error during Janitor execution: {err}", exc_info=True)
+        return 1
+
+    finally:
+        if janitor:
+            janitor.close()
 
 
 if __name__ == "__main__":
     exit_code = run_janitor()
     sys.exit(exit_code)
+
