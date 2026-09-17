@@ -9,7 +9,7 @@ from confluent_kafka import Consumer, KafkaError, KafkaException, TopicPartition
 from pydantic import ValidationError
 
 from src.models.event import CityEvent
-from src.db.events import upsert_city_event
+from src.db.events import init_db_schema, upsert_city_event
 from src.config.database import get_db_pool
 
 logger = logging.getLogger(__name__)
@@ -34,8 +34,12 @@ class EventKafkaConsumer:
         self.topic = topic or os.getenv("KAFKA_TOPIC_NAME", "raw-events-ingestion")
         self.running = False
 
-        # Initialize PostgreSQL connection pool
+        # Initialize PostgreSQL connection pool and verify table schema contracts
         self.db_pool = get_db_pool()
+        try:
+            init_db_schema(self.db_pool)
+        except Exception as schema_err:
+            logger.warning(f"⚠️ [CONSUMER] Schema verification warning: {schema_err}")
 
         # Build Confluent Kafka Consumer configuration
         default_config = {

@@ -10,6 +10,7 @@ from src.consumer.event_consumer import EventKafkaConsumer
 @pytest.fixture
 def mock_consumer_deps():
     with patch("src.consumer.event_consumer.get_db_pool") as mock_get_pool, \
+         patch("src.consumer.event_consumer.init_db_schema") as mock_init_schema, \
          patch("src.consumer.event_consumer.Consumer") as mock_kafka_consumer_cls:
         
         mock_pool = MagicMock()
