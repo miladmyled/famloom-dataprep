@@ -15,9 +15,9 @@ logger = logging.getLogger(__name__)
 class MeetupExtractor(BaseExtractor):
     """
     Public scraper for Meetup events utilizing headless Playwright.
-    Navigates to Meetup's public event discovery pages, waits for network idle,
-    extracts script[type="application/ld+json"] payloads, and normalizes Schema.org
-    Event data into the standard CityEvent schema.
+    Navigates to Meetup's public event discovery pages, intercepts GraphQL
+    queries during page scrolls, extracts embedded JSON-LD payloads, and
+    normalizes both GraphQL and Schema.org event data into standard CityEvent contracts.
     """
 
     def __init__(
@@ -26,9 +26,14 @@ class MeetupExtractor(BaseExtractor):
         target_url: Optional[str] = None,
         headless: bool = True,
         timeout_seconds: int = 30,
+        max_scrolls: Optional[int] = None,
+        scroll_delay_seconds: Optional[float] = None,
+        distance: Optional[str] = None,
         **kwargs: Any,
     ):
         super().__init__(city=city, **kwargs)
+        self.distance = distance or os.getenv("MEETUP_SEARCH_DISTANCE", "tenMiles")
+
         if target_url:
             self.target_url = target_url
         elif os.getenv("MEETUP_TARGET_URL"):
@@ -36,23 +41,34 @@ class MeetupExtractor(BaseExtractor):
         else:
             clean_city = re.sub(r",\s*(Canada|USA|US)$", "", self.city, flags=re.IGNORECASE).strip()
             encoded_city = urllib.parse.quote(clean_city)
-            self.target_url = f"https://www.meetup.com/find/?location={encoded_city}&source=EVENTS"
+            dist_param = f"&distance={self.distance}" if self.distance else ""
+            self.target_url = f"https://www.meetup.com/find/?location={encoded_city}&source=EVENTS{dist_param}"
+
         self.headless = headless
         self.timeout_ms = timeout_seconds * 1000
-
+        self.max_scrolls = max_scrolls if max_scrolls is not None else int(os.getenv("MEETUP_MAX_SCROLLS", "8"))
+        self.scroll_delay_seconds = (
+            scroll_delay_seconds
+            if scroll_delay_seconds is not None
+            else float(os.getenv("MEETUP_SCROLL_DELAY_SECONDS", "1.5"))
+        )
 
     def fetch_raw_events(self) -> List[Dict[str, Any]]:
         """
         Launches Playwright headless Chromium, navigates to target Meetup URL,
-        waits for network idle, and extracts all JSON-LD event definitions.
+        intercepts GraphQL pagination queries during infinite scroll, extracts
+        JSON-LD schema tags, and aggregates unique raw event dictionaries.
 
         Returns:
-            List[Dict[str, Any]]: List of raw Schema.org Event dicts extracted from the page.
+            List[Dict[str, Any]]: List of raw event dicts (GraphQL nodes and Schema.org Events).
         """
         from playwright.sync_api import sync_playwright
 
-        logger.info(f"🌐 [MeetupExtractor] Navigating to '{self.target_url}' (headless={self.headless})...")
-        raw_events: List[Dict[str, Any]] = []
+        logger.info(
+            f"🌐 [MeetupExtractor] Navigating to '{self.target_url}' "
+            f"(headless={self.headless}, max_scrolls={self.max_scrolls})..."
+        )
+        captured_events: Dict[str, Dict[str, Any]] = {}
 
         try:
             with sync_playwright() as p:
@@ -61,36 +77,98 @@ class MeetupExtractor(BaseExtractor):
                     user_agent=(
                         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                    )
+                    ),
+                    viewport={"width": 1280, "height": 900},
                 )
                 page = context.new_page()
 
-                # Navigate and wait for network idle to ensure hydration is complete
-                page.goto(self.target_url, timeout=self.timeout_ms)
-                page.wait_for_load_state("networkidle", timeout=self.timeout_ms)
-
-                # Locate all application/ld+json script tags
-                script_elements = page.query_selector_all('script[type="application/ld+json"]')
-                logger.info(f"🔎 [MeetupExtractor] Found {len(script_elements)} application/ld+json script tag(s).")
-
-                for elem in script_elements:
-                    content = elem.inner_text()
-                    if not content or not content.strip():
-                        continue
-
+                # Response listener to capture dynamic GraphQL responses
+                def _handle_response(response: Any) -> None:
                     try:
-                        payload = json.loads(content.strip())
-                        self._extract_events_from_payload(payload, raw_events)
-                    except json.JSONDecodeError as jde:
-                        logger.warning(f"⚠️ [MeetupExtractor] Failed to parse JSON-LD script block: {jde}")
+                        if "gql2" in response.url and response.status == 200:
+                            body = response.json()
+                            if isinstance(body, dict) and "data" in body:
+                                data = body["data"]
+                                result = data.get("result") if isinstance(data, dict) else None
+                                if isinstance(result, dict) and "edges" in result:
+                                    edges = result.get("edges")
+                                    if isinstance(edges, list):
+                                        for edge in edges:
+                                            if isinstance(edge, dict):
+                                                node = edge.get("node")
+                                                if isinstance(node, dict):
+                                                    node_id = str(node.get("id") or node.get("eventUrl") or "")
+                                                    if node_id and node_id not in captured_events:
+                                                        captured_events[node_id] = node
+                    except Exception:
+                        pass
+
+                page.on("response", _handle_response)
+
+                # 1. Initial page navigation
+                try:
+                    page.goto(self.target_url, timeout=self.timeout_ms)
+                    page.wait_for_load_state("networkidle", timeout=self.timeout_ms)
+                except Exception as nav_err:
+                    logger.warning(f"⚠️ [MeetupExtractor] Navigation wait encountered: {nav_err}. Continuing...")
+
+                # 2. Extract SSR Schema.org JSON-LD tags
+                json_ld_events: List[Dict[str, Any]] = []
+                try:
+                    script_elements = page.query_selector_all('script[type="application/ld+json"]')
+                    for elem in script_elements:
+                        content = elem.inner_text()
+                        if not content or not content.strip():
+                            continue
+                        try:
+                            payload = json.loads(content.strip())
+                            self._extract_events_from_payload(payload, json_ld_events)
+                        except json.JSONDecodeError:
+                            pass
+                except Exception as ld_err:
+                    logger.warning(f"⚠️ [MeetupExtractor] Error reading JSON-LD scripts: {ld_err}")
+
+                for ld_ev in json_ld_events:
+                    ev_key = str(ld_ev.get("url") or ld_ev.get("name") or len(captured_events))
+                    if ev_key not in captured_events:
+                        captured_events[ev_key] = ld_ev
+
+                logger.info(
+                    f"🔎 [MeetupExtractor] Initial load captured {len(captured_events)} event(s) "
+                    f"(JSON-LD + initial GraphQL). Commencing scrolls..."
+                )
+
+                # 3. Iterative scrolling to hydrate additional paginated events
+                consecutive_zero_diff = 0
+                for scroll_idx in range(1, self.max_scrolls + 1):
+                    count_before = len(captured_events)
+                    try:
+                        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                        page.wait_for_timeout(int(self.scroll_delay_seconds * 1000))
+                    except Exception as scroll_err:
+                        logger.warning(f"⚠️ [MeetupExtractor] Scroll step {scroll_idx} failed: {scroll_err}")
+                        break
+
+                    new_added = len(captured_events) - count_before
+                    if new_added == 0:
+                        consecutive_zero_diff += 1
+                        if consecutive_zero_diff >= 2:
+                            logger.info(
+                                f"ℹ️ [MeetupExtractor] No new events detected after {scroll_idx} scrolls. "
+                                f"Ending scroll loop."
+                            )
+                            break
+                    else:
+                        consecutive_zero_diff = 0
 
                 browser.close()
 
         except Exception as err:
             logger.error(f"❌ [MeetupExtractor] Error fetching events via Playwright: {err}", exc_info=True)
 
-        logger.info(f"📥 [MeetupExtractor] Extracted {len(raw_events)} raw event payload(s) for '{self.city}'.")
-        return raw_events
+        raw_list = list(captured_events.values())
+        logger.info(f"📥 [MeetupExtractor] Extracted total {len(raw_list)} raw event payload(s) for '{self.city}'.")
+        return raw_list
 
     def _extract_events_from_payload(
         self, payload: Any, raw_events: List[Dict[str, Any]]
@@ -119,37 +197,46 @@ class MeetupExtractor(BaseExtractor):
 
     def normalize_data(self, raw_events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Normalizes Schema.org JSON-LD Event objects into dictionaries adhering
-        to the CityEvent contract defined in src/models/event.py.
+        Normalizes raw Meetup events (Schema.org JSON-LD or GraphQL node dicts)
+        into standardized dictionaries adhering to the CityEvent contract.
 
         Args:
-            raw_events: Raw Schema.org Event dictionaries.
+            raw_events: List of raw event dictionaries.
 
         Returns:
             List[Dict[str, Any]]: Standardized event dictionaries ready for transformer validation.
         """
         normalized: List[Dict[str, Any]] = []
+        seen_urls = set()
 
         for raw in raw_events:
             try:
-                # 1. Event ID extraction
-                url = raw.get("url", "")
+                # 1. URL and Event ID extraction
+                url = str(raw.get("eventUrl") or raw.get("url") or "").strip()
+                if url and url in seen_urls:
+                    continue
+
                 event_id = None
-                if url:
-                    match = re.search(r"/events/(\d+)", str(url))
+                node_id = raw.get("id")
+                if node_id and str(node_id).isdigit():
+                    event_id = f"meetup_{node_id}"
+                elif url:
+                    match = re.search(r"/events/(\d+)", url)
                     if match:
                         event_id = f"meetup_{match.group(1)}"
+
                 if not event_id:
-                    event_id = f"meetup_{abs(hash(str(url or raw.get('name', '')))) % 100000000}"
+                    fallback_hash = abs(hash(str(url or raw.get("title") or raw.get("name", "")))) % 100000000
+                    event_id = f"meetup_{fallback_hash}"
 
                 # 2. Title (max 240 chars per CityEvent schema)
-                title = str(raw.get("name") or "Untitled Meetup Event").strip()[:240]
+                title = str(raw.get("title") or raw.get("name") or "Untitled Meetup Event").strip()[:240]
 
                 # 3. Start and End Date
-                start_date = raw.get("startDate")
-                end_date = raw.get("endDate") or None
+                start_date = raw.get("dateTime") or raw.get("startDate")
+                end_date = raw.get("endTime") or raw.get("endDate") or None
                 if not start_date:
-                    logger.warning(f"⚠️ [MeetupExtractor] Skipping event '{title}' missing startDate.")
+                    logger.warning(f"⚠️ [MeetupExtractor] Skipping event '{title}' missing startDate/dateTime.")
                     continue
 
                 # 4. Description
@@ -158,19 +245,17 @@ class MeetupExtractor(BaseExtractor):
                     description = str(description).strip()
 
                 # 5. Location summary
-                location_summary = self._format_location_summary(raw.get("location"))
+                location_summary = self._resolve_location_summary(raw)
 
                 # 6. Status and tombstone flag
-                status_raw = str(raw.get("eventStatus", "")).lower()
+                status_raw = str(raw.get("eventStatus") or raw.get("status") or "").lower()
                 is_canceled = False
                 status = "live"
 
                 if "cancelled" in status_raw or "canceled" in status_raw:
                     status = "canceled"
                     is_canceled = True
-                elif "postponed" in status_raw:
-                    status = "postponed"
-                elif "rescheduled" in status_raw:
+                elif "postponed" in status_raw or "rescheduled" in status_raw:
                     status = "postponed"
 
                 event_city = self._resolve_event_city(raw)
@@ -190,47 +275,53 @@ class MeetupExtractor(BaseExtractor):
                     "tag_ids": [],
                 }
                 normalized.append(normalized_event)
+                if url:
+                    seen_urls.add(url)
 
             except Exception as err:
                 logger.error(f"❌ [MeetupExtractor] Error normalizing raw Meetup event: {err}", exc_info=True)
 
         return normalized
 
-    def _resolve_event_city(self, raw_event: Dict[str, Any]) -> str:
+    def _resolve_location_summary(self, raw_event: Dict[str, Any]) -> Optional[str]:
         """
-        Determines the true city for an event from its Schema.org location address,
-        falling back to self.city if not explicitly specified.
+        Extracts human-readable venue name and address from either GraphQL venue
+        structures or Schema.org Place/VirtualLocation objects.
         """
-        has_country = "canada" in self.city.lower() or "usa" in self.city.lower()
-        suffix = ", Canada" if has_country else ""
+        event_type = str(raw_event.get("eventType", "")).upper()
 
+        # Check GraphQL venue object
+        venue = raw_event.get("venue")
+        if isinstance(venue, dict):
+            name = str(venue.get("name", "")).strip()
+            address = str(venue.get("address", "")).strip()
+            city = str(venue.get("city", "")).strip()
+            state = str(venue.get("state", "")).strip()
+
+            addr_parts = [p for p in [address, city, state] if p]
+            addr_str = ", ".join(addr_parts)
+
+            if name and addr_str:
+                return f"{name} ({addr_str})"
+            if name:
+                return name
+            if addr_str:
+                return addr_str
+
+        if event_type == "ONLINE":
+            return "Online event"
+
+        # Fall back to Schema.org location
         loc = raw_event.get("location")
-        if isinstance(loc, dict):
-            addr = loc.get("address")
-            if isinstance(addr, dict):
-                locality = addr.get("addressLocality")
-                region = addr.get("addressRegion", "BC")
-                # Exclude country placeholders like 'Canada' in addressLocality
-                if locality and str(locality).strip().lower() not in ["canada", "usa", "us"]:
-                    locality_clean = str(locality).strip()
-                    return f"{locality_clean}, {region}{suffix}"
+        if loc:
+            return self._format_schema_location(loc)
 
-                # Check streetAddress for known municipalities
-                street = str(addr.get("streetAddress", ""))
-                for known in ["Vancouver", "Coquitlam", "Burnaby", "Richmond", "Surrey", "Toronto"]:
-                    if re.search(rf"\b{known}\b", street, re.IGNORECASE):
-                        return f"{known}, {region}{suffix}"
-        return self.city
+        return None
 
-
-
-    def _format_location_summary(self, location_data: Any) -> Optional[str]:
+    def _format_schema_location(self, location_data: Any) -> Optional[str]:
         """
-        Extracts human-readable venue name and address from Schema.org Place/VirtualLocation.
+        Extracts location string from Schema.org Place / PostalAddress.
         """
-        if not location_data:
-            return None
-
         if isinstance(location_data, str):
             return location_data.strip() or None
 
@@ -250,7 +341,40 @@ class MeetupExtractor(BaseExtractor):
                 addr_str = address.strip()
 
             if name and addr_str:
-                return f"{name.strip()} ({addr_str})"
-            return name or addr_str or None
+                return f"{str(name).strip()} ({addr_str})"
+            return str(name).strip() if name else (addr_str or None)
 
         return None
+
+    def _resolve_event_city(self, raw_event: Dict[str, Any]) -> str:
+        """
+        Determines the true city for an event from GraphQL venue or Schema.org address,
+        falling back to self.city if not explicitly specified.
+        """
+        has_country = "canada" in self.city.lower() or "usa" in self.city.lower()
+        suffix = ", Canada" if has_country else ""
+
+        # 1. GraphQL Venue
+        venue = raw_event.get("venue")
+        if isinstance(venue, dict):
+            v_city = venue.get("city")
+            v_state = venue.get("state", "BC")
+            if v_city and str(v_city).strip().lower() not in ["canada", "usa", "us", ""]:
+                return f"{str(v_city).strip()}, {v_state}{suffix}"
+
+        # 2. Schema.org Location
+        loc = raw_event.get("location")
+        if isinstance(loc, dict):
+            addr = loc.get("address")
+            if isinstance(addr, dict):
+                locality = addr.get("addressLocality")
+                region = addr.get("addressRegion", "BC")
+                if locality and str(locality).strip().lower() not in ["canada", "usa", "us"]:
+                    return f"{str(locality).strip()}, {region}{suffix}"
+
+                street = str(addr.get("streetAddress", ""))
+                for known in ["Vancouver", "Coquitlam", "Burnaby", "Richmond", "Surrey", "Toronto", "North Vancouver"]:
+                    if re.search(rf"\b{known}\b", street, re.IGNORECASE):
+                        return f"{known}, {region}{suffix}"
+
+        return self.city
