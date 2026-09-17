@@ -20,6 +20,9 @@ def test_meetup_extractor_init_defaults():
     assert extractor.city == "Coquitlam, BC"
     assert "coquitlam" in extractor.target_url.lower()
     assert extractor.headless is True
+    assert extractor.max_scrolls == 8
+    assert extractor.distance == "tenMiles"
+    assert "distance=tenMiles" in extractor.target_url
 
 
 def test_meetup_extractor_init_custom():
@@ -28,11 +31,17 @@ def test_meetup_extractor_init_custom():
         target_url="https://www.meetup.com/find/?location=ca--bc--vancouver&source=EVENTS",
         headless=False,
         timeout_seconds=15,
+        max_scrolls=12,
+        scroll_delay_seconds=2.0,
+        distance="twentyFiveMiles",
     )
     assert extractor.city == "Vancouver, BC"
     assert extractor.target_url == "https://www.meetup.com/find/?location=ca--bc--vancouver&source=EVENTS"
     assert extractor.headless is False
     assert extractor.timeout_ms == 15000
+    assert extractor.max_scrolls == 12
+    assert extractor.scroll_delay_seconds == 2.0
+    assert extractor.distance == "twentyFiveMiles"
 
 
 def test_meetup_extractor_normalize_data_standard_event():
@@ -105,6 +114,93 @@ def test_meetup_extractor_normalize_data_standard_event():
     assert validated_canceled.is_canceled is True
 
 
+def test_meetup_extractor_normalize_graphql_node():
+    future_time = (datetime.now(timezone.utc) + timedelta(days=5)).isoformat()
+    raw_nodes = [
+        {
+            "id": "316404270",
+            "title": "The Relevance Workshop",
+            "dateTime": future_time,
+            "description": "Seasoned professionals roadmap workshop.",
+            "eventType": "ONLINE",
+            "eventUrl": "https://www.meetup.com/unleashing-influence-vancouver/events/316404270/",
+            "venue": {
+                "name": "Online event",
+                "address": "",
+                "city": "",
+                "state": "",
+            },
+        },
+        {
+            "id": "316283557",
+            "title": "Type Brigade №62 × Design Vancouver Festival",
+            "dateTime": future_time,
+            "description": "Vancouver typography meetup at BCIT Downtown Campus.",
+            "eventType": "PHYSICAL",
+            "eventUrl": "https://www.meetup.com/typebrigade/events/316283557/",
+            "venue": {
+                "name": "BCIT Downtown Campus",
+                "address": "555 Seymour St",
+                "city": "Vancouver",
+                "state": "BC",
+            },
+        },
+    ]
+
+    extractor = MeetupExtractor(city="Vancouver, BC")
+    normalized = extractor.normalize_data(raw_nodes)
+
+    assert len(normalized) == 2
+
+    # Node 1: Online event
+    n1 = normalized[0]
+    assert n1["event_id"] == "meetup_316404270"
+    assert n1["title"] == "The Relevance Workshop"
+    assert n1["source"] == "Meetup"
+    assert n1["location_summary"] == "Online event"
+    assert n1["status"] == "live"
+    assert n1["is_canceled"] is False
+
+    validated1 = clean_and_validate_event(n1)
+    assert validated1 is not None
+    assert validated1.event_id == "meetup_316404270"
+
+    # Node 2: Physical venue
+    n2 = normalized[1]
+    assert n2["event_id"] == "meetup_316283557"
+    assert "Type Brigade" in n2["title"]
+    assert "BCIT Downtown Campus" in n2["location_summary"]
+    assert "555 Seymour St" in n2["location_summary"]
+    assert "Vancouver" in n2["city"]
+
+    validated2 = clean_and_validate_event(n2)
+    assert validated2 is not None
+
+
+def test_meetup_extractor_deduplication():
+    future_time = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+    duplicate_events = [
+        {
+            "id": "316404270",
+            "title": "The Relevance Workshop",
+            "dateTime": future_time,
+            "eventUrl": "https://www.meetup.com/events/316404270/",
+        },
+        {
+            "@type": "Event",
+            "name": "The Relevance Workshop - Duplicate",
+            "startDate": future_time,
+            "url": "https://www.meetup.com/events/316404270/",
+        },
+    ]
+
+    extractor = MeetupExtractor(city="Vancouver, BC")
+    normalized = extractor.normalize_data(duplicate_events)
+
+    assert len(normalized) == 1
+    assert normalized[0]["event_id"] == "meetup_316404270"
+
+
 def test_meetup_extractor_extract_events_from_payload():
     extractor = MeetupExtractor()
 
@@ -174,11 +270,12 @@ def test_meetup_extractor_fetch_raw_events_mocked():
     mock_sync_pw.__enter__.return_value = mock_playwright
 
     with patch("playwright.sync_api.sync_playwright", return_value=mock_sync_pw):
-        extractor = MeetupExtractor()
+        extractor = MeetupExtractor(max_scrolls=2)
         raw_events = extractor.fetch_raw_events()
 
         assert len(raw_events) == 1
         assert raw_events[0]["name"] == "Coquitlam Family Board Games"
         mock_page.goto.assert_called_once_with(extractor.target_url, timeout=extractor.timeout_ms)
         mock_page.wait_for_load_state.assert_called_once_with("networkidle", timeout=extractor.timeout_ms)
+        assert mock_page.evaluate.call_count >= 1
         mock_browser.close.assert_called_once()
