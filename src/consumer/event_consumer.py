@@ -4,7 +4,7 @@ import json
 import time
 import socket
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from confluent_kafka import Consumer, KafkaError, KafkaException, TopicPartition, OFFSET_STORED, OFFSET_BEGINNING
 from pydantic import ValidationError
 
