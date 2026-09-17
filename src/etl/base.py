@@ -46,3 +46,7 @@ class BaseEventScraper(ABC):
         """
         raw_events = self.fetch_raw_events()
         return self.normalize_data(raw_events)
+
+
+# Backwards compatibility and alias for extractor naming convention
+BaseExtractor = BaseEventScraper
