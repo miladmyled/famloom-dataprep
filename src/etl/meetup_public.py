@@ -500,6 +500,7 @@ class MeetupExtractor(BaseExtractor):
                     status = "postponed"
 
                 event_city = self._resolve_event_city(raw)
+                pictureurl = self._resolve_picture_url(raw)
 
                 normalized_event = {
                     "event_id": event_id,
@@ -513,6 +514,7 @@ class MeetupExtractor(BaseExtractor):
                     "location_summary": location_summary,
                     "status": status,
                     "is_canceled": is_canceled,
+                    "pictureurl": pictureurl,
                     "tag_ids": [],
                 }
                 normalized.append(normalized_event)
@@ -523,6 +525,47 @@ class MeetupExtractor(BaseExtractor):
                 logger.error(f"❌ [MeetupExtractor] Error normalizing raw Meetup event: {err}", exc_info=True)
 
         return normalized
+
+    def _resolve_picture_url(self, raw: Dict[str, Any]) -> Optional[str]:
+        """
+        Extracts high-resolution image URL from Meetup GraphQL photo objects,
+        Schema.org image fields, or group fallback photos.
+        """
+        # 1. Direct photo objects from GraphQL (featuredEventPhoto, displayPhoto, photo)
+        for key in ("featuredEventPhoto", "displayPhoto", "photo"):
+            photo_obj = raw.get(key)
+            if isinstance(photo_obj, dict):
+                url = photo_obj.get("highResUrl") or photo_obj.get("baseUrl")
+                if url and str(url).startswith("http"):
+                    return str(url)
+
+        # 2. Schema.org / standard image field
+        img = raw.get("image")
+        if isinstance(img, str) and img.startswith("http"):
+            return img
+        elif isinstance(img, list) and img and isinstance(img[0], str) and img[0].startswith("http"):
+            return img[0]
+        elif isinstance(img, dict):
+            url = img.get("url") or img.get("contentUrl")
+            if url and str(url).startswith("http"):
+                return str(url)
+
+        # 3. Fallback to group key photo
+        group = raw.get("group")
+        if isinstance(group, dict):
+            group_photo = group.get("keyGroupPhoto")
+            if isinstance(group_photo, dict):
+                url = group_photo.get("highResUrl") or group_photo.get("baseUrl")
+                if url and str(url).startswith("http"):
+                    return str(url)
+
+        # 4. Direct pictureurl or picture_url
+        for k in ("pictureurl", "picture_url", "image_url", "photo_url"):
+            val = raw.get(k)
+            if isinstance(val, str) and val.startswith("http"):
+                return val
+
+        return None
 
     def _resolve_location_summary(self, raw_event: Dict[str, Any]) -> Optional[str]:
         """
