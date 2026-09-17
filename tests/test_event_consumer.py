@@ -164,3 +164,30 @@ def test_process_message_partition_eof(mock_consumer_deps):
     consumer = EventKafkaConsumer()
     success = consumer.process_message(mock_msg)
     assert success is True
+
+
+def test_process_batch_success(mock_consumer_deps):
+    mock_pool, mock_k_consumer = mock_consumer_deps
+    mock_conn = MagicMock()
+    mock_pool.connection.return_value.__enter__.return_value = mock_conn
+
+    future_date = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+    events = [
+        {"event_id": f"batch_{i}", "city": "Vancouver, BC", "title": f"Camp {i}", "url": f"https://e.com/{i}", "start_date": future_date, "status": "live", "is_canceled": False}
+        for i in range(3)
+    ]
+
+    mock_msgs = []
+    for idx, ev in enumerate(events):
+        m = MagicMock()
+        m.error.return_value = None
+        m.value.return_value = json.dumps(ev).encode("utf-8")
+        m.offset.return_value = 1000 + idx
+        mock_msgs.append(m)
+
+    consumer = EventKafkaConsumer()
+    with patch("src.consumer.event_consumer.upsert_city_event") as mock_upsert:
+        processed = consumer.process_batch(mock_msgs)
+        assert processed == 3
+        assert mock_upsert.call_count == 3
+        mock_k_consumer.commit.assert_called_once_with(message=mock_msgs[-1], asynchronous=True)

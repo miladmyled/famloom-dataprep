@@ -159,19 +159,99 @@ class EventKafkaConsumer:
         )
         return True
 
+    def process_batch(self, messages: List[Any]) -> int:
+        """
+        Processes a batch of Kafka messages in a single database transaction,
+        committing the highest offset once persisted. Falls back to single-message
+        processing if a batch transaction encounters an error.
+        """
+        if not messages:
+            return 0
+
+        valid_events: List[CityEvent] = []
+        valid_msgs: List[Any] = []
+
+        for msg in messages:
+            if msg.error():
+                if msg.error().code() == KafkaError._PARTITION_EOF:
+                    continue
+                logger.error(f"[CONSUMER] Kafka message error: {msg.error()}")
+                continue
+
+            raw_value = msg.value()
+            if raw_value is None:
+                # Tombstone
+                try:
+                    self.consumer.commit(message=msg, asynchronous=False)
+                except Exception:
+                    pass
+                continue
+
+            msg_str = raw_value.decode("utf-8", errors="replace")
+            try:
+                payload_dict = json.loads(msg_str)
+                event = CityEvent(**payload_dict)
+                valid_events.append(event)
+                valid_msgs.append(msg)
+            except Exception as val_err:
+                logger.warning(
+                    f"☣️ [POISON PILL] Corrupt message dropped at offset {msg.offset()}: {val_err}"
+                )
+                try:
+                    self.consumer.commit(message=msg, asynchronous=True)
+                except Exception:
+                    pass
+
+        if not valid_events:
+            return 0
+
+        # Attempt atomic batch transaction across WAN to Azure
+        try:
+            with self.db_pool.connection() as conn:
+                with conn.transaction():
+                    for event in valid_events:
+                        upsert_city_event(conn, event)
+
+            # Commit highest offset in batch
+            highest_msg = valid_msgs[-1]
+            try:
+                self.consumer.commit(message=highest_msg, asynchronous=True)
+            except Exception:
+                pass
+
+            logger.info(
+                f"✅ [BATCH LOADED] Persisted {len(valid_events)} event(s) to PostgreSQL "
+                f"(Offsets {valid_msgs[0].offset()}-{valid_msgs[-1].offset()})."
+            )
+            return len(valid_events)
+
+        except Exception as batch_err:
+            logger.warning(
+                f"⚠️ [CONSUMER] Batch transaction encountered error: {batch_err}. "
+                "Falling back to single-message processing for resilience..."
+            )
+            success_count = 0
+            for msg in valid_msgs:
+                if self.process_message(msg):
+                    success_count += 1
+            return success_count
+
     def run(self, poll_timeout: float = 1.0) -> None:
         """
-        Main polling loop for the consumer worker.
+        Main polling loop for the consumer worker using batched consumption.
         Runs until self.running is set to False (via signal handler).
         """
         self.running = True
-        logger.info(f"🚀 [CONSUMER] Starting main polling loop on topic '{self.topic}'...")
+        batch_size = int(os.getenv("KAFKA_CONSUMER_BATCH_SIZE", "50"))
+        logger.info(
+            f"🚀 [CONSUMER] Starting main polling loop (batch_size={batch_size}) on topic '{self.topic}'..."
+        )
 
         idle_polls = 0
         while self.running:
             try:
-                msg = self.consumer.poll(timeout=poll_timeout)
-                if msg is None:
+                msgs = self.consumer.consume(num_messages=batch_size, timeout=poll_timeout)
+                if not msgs:
                     idle_polls += 1
                     if idle_polls >= 30:
                         logger.info(
@@ -182,9 +262,7 @@ class EventKafkaConsumer:
                     continue
 
                 idle_polls = 0
-                success = self.process_message(msg)
-                if not success:
-                    time.sleep(0.5)
+                self.process_batch(msgs)
 
             except KafkaException as ke:
                 logger.error(f"[CONSUMER] Kafka exception during poll: {ke}")
