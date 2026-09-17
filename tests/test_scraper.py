@@ -208,10 +208,10 @@ def test_source_date_filtering_parameters():
         scraper.fetch_raw_events()
 
         payload = mock_post.call_args[1]["json"]["event_search"]
-        assert "start_date.range_start" in payload
         assert "date_range" in payload
+        assert "from" in payload["date_range"]
+        assert "to" in payload["date_range"]
         assert payload["dates"] == "current_future"
-        assert payload["start_date.range_start"].endswith("T00:00:00Z")
 
 
 def test_multi_city_dynamic_support():
