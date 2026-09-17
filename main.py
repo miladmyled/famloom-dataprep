@@ -1,3 +1,4 @@
+import os
 import sys
 import time
 import logging
@@ -142,7 +143,7 @@ def run_etl_pipeline() -> int:
         scraper_tasks.append((f"MeetupExtractor[{city}]", MeetupExtractor(city=city)))
 
     try:
-        max_workers = min(8, max(len(scraper_tasks), 1))
+        max_workers = min(int(os.getenv("MAX_CONCURRENT_WORKERS", "3")), max(len(scraper_tasks), 1))
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [
                 executor.submit(

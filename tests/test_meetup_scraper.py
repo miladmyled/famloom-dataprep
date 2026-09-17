@@ -275,7 +275,8 @@ def test_meetup_extractor_fetch_raw_events_mocked():
 
         assert len(raw_events) == 1
         assert raw_events[0]["name"] == "Coquitlam Family Board Games"
-        mock_page.goto.assert_called_once_with(extractor.target_url, timeout=extractor.timeout_ms)
-        mock_page.wait_for_load_state.assert_called_once_with("networkidle", timeout=extractor.timeout_ms)
+        mock_page.goto.assert_called_once_with(
+            extractor.target_url, wait_until="domcontentloaded", timeout=extractor.timeout_ms
+        )
         assert mock_page.evaluate.call_count >= 1
         mock_browser.close.assert_called_once()
