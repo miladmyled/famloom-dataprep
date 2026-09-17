@@ -1,3 +1,4 @@
 """Consumer module package."""
+from src.consumer.event_consumer import EventKafkaConsumer
 
-__all__ = []
+__all__ = ["EventKafkaConsumer"]
