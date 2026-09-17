@@ -3,7 +3,7 @@ import time
 import random
 import logging
 from typing import Any, Dict, List, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 import requests
 from dotenv import load_dotenv
@@ -144,10 +144,10 @@ class EventbriteScraper(BaseEventScraper):
         seen_continuation_tokens = set()
         start_time = time.time()
 
-        # Source date filtering: start date >= CURRENT_DATE
+        # Source date filtering: start date >= CURRENT_DATE and <= CURRENT_DATE + 14 days
         now_utc = datetime.now(timezone.utc)
         current_date_str = now_utc.strftime("%Y-%m-%d")
-        current_date_iso = now_utc.strftime("%Y-%m-%dT00:00:00Z")
+        future_date_str = (now_utc + timedelta(days=14)).strftime("%Y-%m-%d")
 
         # Simplify city name for search query (e.g. 'Vancouver, BC, Canada' -> 'Vancouver')
         clean_city_query = target_city.split(",")[0].strip()
@@ -178,8 +178,10 @@ class EventbriteScraper(BaseEventScraper):
             event_search_params: Dict[str, Any] = {
                 "q": search_query,
                 "dates": "current_future",
-                "start_date.range_start": current_date_iso,
-                "date_range": {"start": current_date_str},
+                "date_range": {
+                    "from": current_date_str,
+                    "to": future_date_str,
+                },
                 "page": page,
                 "page_size": 20,
             }
