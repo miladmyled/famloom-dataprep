@@ -23,7 +23,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
       - name: consumer-container
-        image: ghcr.io/miladmyled/famloom-dataprep:sha-74ec41e
+        image: ghcr.io/miladmyled/famloom-dataprep:sha-1cadf10
         imagePullPolicy: IfNotPresent
         command: ["python", "consumer_main.py"]
         env:
