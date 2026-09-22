@@ -148,3 +148,31 @@ def test_get_active_interests_graceful_error_handling():
     result = get_active_interests(mock_pool)
     assert result == {}
 
+
+def test_upsert_city_event_with_pictureurl():
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+    mock_cursor.fetchone.return_value = {"id": 105}
+
+    future_date = datetime.now(timezone.utc) + timedelta(days=3)
+    event = CityEvent(
+        event_id="eb_sql_test_pic",
+        city="Vancouver, BC",
+        title="Family Puppet Show",
+        url="https://eventbrite.ca/e/puppet-pic",
+        start_date=future_date,
+        pictureurl="https://img.evbuc.com/images/999/original.jpg",
+    )
+
+    upsert_city_event(mock_conn, event)
+
+    assert mock_cursor.execute.called
+    call_args = mock_cursor.execute.call_args_list[0]
+    sql = call_args[0][0]
+    params = call_args[0][1]
+
+    assert "pictureurl" in sql
+    assert params["pictureurl"] == "https://img.evbuc.com/images/999/original.jpg"
+
+
