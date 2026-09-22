@@ -246,3 +246,39 @@ def test_multi_city_dynamic_support():
         assert normalized[0]["city"] == "Vancouver, BC"
         assert normalized[1]["city"] == "Burnaby, BC"
 
+
+def test_eventbrite_normalization_pictureurl():
+    scraper = EventbriteScraper(city="Vancouver, BC", api_token="test_token")
+    raw_events = [
+        {
+            "id": "111",
+            "name": "Event with Logo Dict",
+            "url": "https://eb.com/111",
+            "start_date": "2026-09-25",
+            "logo": {"original": {"url": "https://img.evbuc.com/logo1.jpg"}},
+        },
+        {
+            "id": "222",
+            "name": "Event with Direct pictureurl",
+            "url": "https://eb.com/222",
+            "start_date": "2026-09-25",
+            "pictureurl": "https://img.evbuc.com/direct.jpg",
+        },
+        {
+            "id": "333",
+            "name": "Event with image_id",
+            "url": "https://eb.com/333",
+            "start_date": "2026-09-25",
+            "image_id": "999888",
+        },
+    ]
+
+    with patch.object(scraper, "_fetch_media_url", return_value="https://img.evbuc.com/resolved_999888.jpg"):
+        normalized = scraper.normalize_data(raw_events)
+
+    assert len(normalized) == 3
+    assert normalized[0]["pictureurl"] == "https://img.evbuc.com/logo1.jpg"
+    assert normalized[1]["pictureurl"] == "https://img.evbuc.com/direct.jpg"
+    assert normalized[2]["pictureurl"] == "https://img.evbuc.com/resolved_999888.jpg"
+
+

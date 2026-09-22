@@ -179,3 +179,39 @@ def test_city_event_timezone_leeway_few_hours_difference():
     assert event.start_date.tzinfo == timezone.utc
 
 
+def test_city_event_pictureurl():
+    future_date = datetime.now(timezone.utc) + timedelta(days=3)
+    event = CityEvent(
+        event_id="event_pic_1",
+        city="Vancouver, BC",
+        title="Art Festival",
+        url="https://eventbrite.com/e/art-fest",
+        start_date=future_date,
+        pictureurl="https://img.evbuc.com/images/123/original.jpg",
+    )
+    assert event.pictureurl == "https://img.evbuc.com/images/123/original.jpg"
+
+    # Test alias mapping (picture_url, image_url)
+    event_alias = CityEvent(
+        event_id="event_pic_2",
+        city="Vancouver, BC",
+        title="Art Festival 2",
+        url="https://eventbrite.com/e/art-fest-2",
+        start_date=future_date,
+        picture_url="https://secure.meetupstatic.com/photos/highres_123.jpeg",
+    )
+    assert event_alias.pictureurl == "https://secure.meetupstatic.com/photos/highres_123.jpeg"
+
+    # Test invalid URL falls back to None
+    event_invalid = CityEvent(
+        event_id="event_pic_3",
+        city="Vancouver, BC",
+        title="Art Festival 3",
+        url="https://eventbrite.com/e/art-fest-3",
+        start_date=future_date,
+        pictureurl="not-a-valid-url",
+    )
+    assert event_invalid.pictureurl is None
+
+
+

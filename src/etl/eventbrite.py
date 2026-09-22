@@ -56,6 +56,28 @@ class EventbriteScraper(BaseEventScraper):
         # Rate Limit / Retry Config
         self.max_retries = int(os.getenv("EVENTBRITE_MAX_RETRIES", "3"))
         self.base_backoff_seconds = float(os.getenv("EVENTBRITE_BASE_BACKOFF_SECONDS", "1.0"))
+        self._media_cache: Dict[str, str] = {}
+
+    def _fetch_media_url(self, image_id: str) -> Optional[str]:
+        """Resolves Eventbrite media image_id to public CDN image URL."""
+        if not image_id or not self.api_token:
+            return None
+        image_id_str = str(image_id).strip()
+        if image_id_str in self._media_cache:
+            return self._media_cache[image_id_str]
+        try:
+            url = f"{self.base_url}/media/{image_id_str}/"
+            headers = self._get_headers()
+            response = requests.get(url, headers=headers, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                img_url = data.get("url") or data.get("original", {}).get("url")
+                if img_url:
+                    self._media_cache[image_id_str] = img_url
+                    return img_url
+        except Exception as e:
+            logger.debug(f"Failed to resolve media image_id {image_id_str}: {e}")
+        return None
 
     def _get_headers(self) -> Dict[str, str]:
         headers = {
@@ -256,6 +278,28 @@ class EventbriteScraper(BaseEventScraper):
         """
         normalized: List[Dict[str, Any]] = []
 
+        # Pre-resolve any unresolved image_ids in parallel
+        unresolved_image_ids = set()
+        for raw in raw_events:
+            logo_field = raw.get("logo")
+            has_direct = False
+            if isinstance(logo_field, dict) and (logo_field.get("original", {}).get("url") or logo_field.get("url")):
+                has_direct = True
+            elif isinstance(logo_field, str) and logo_field.startswith("http"):
+                has_direct = True
+            elif raw.get("pictureurl") or raw.get("picture_url") or raw.get("image_url"):
+                has_direct = True
+
+            if not has_direct and raw.get("image_id"):
+                iid = str(raw["image_id"]).strip()
+                if iid and iid not in self._media_cache:
+                    unresolved_image_ids.add(iid)
+
+        if unresolved_image_ids and self.api_token:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=min(10, len(unresolved_image_ids))) as executor:
+                list(executor.map(self._fetch_media_url, unresolved_image_ids))
+
         for raw in raw_events:
             # Extract idempotency key: unique event_id
             raw_id = raw.get("id") or raw.get("eid") or raw.get("eventbrite_event_id")
@@ -273,6 +317,36 @@ class EventbriteScraper(BaseEventScraper):
 
             # Extract URL
             url = raw.get("url") or raw.get("tickets_url", "")
+
+            # Extract pictureurl
+            pictureurl = None
+            logo_field = raw.get("logo")
+            if isinstance(logo_field, dict):
+                original = logo_field.get("original")
+                if isinstance(original, dict) and original.get("url"):
+                    pictureurl = original.get("url")
+                elif logo_field.get("url"):
+                    pictureurl = logo_field.get("url")
+            elif isinstance(logo_field, str) and logo_field.startswith("http"):
+                pictureurl = logo_field
+
+            if not pictureurl:
+                image_field = raw.get("image")
+                if isinstance(image_field, dict):
+                    pictureurl = image_field.get("url") or image_field.get("originalUrl")
+                elif isinstance(image_field, str) and image_field.startswith("http"):
+                    pictureurl = image_field
+
+            if not pictureurl and raw.get("image_id"):
+                iid = str(raw["image_id"]).strip()
+                pictureurl = self._fetch_media_url(iid)
+
+            if not pictureurl:
+                for k in ("pictureurl", "picture_url", "image_url"):
+                    val = raw.get(k)
+                    if isinstance(val, str) and val.startswith("http"):
+                        pictureurl = val
+                        break
 
             # Extract timezone and dates
             event_tz_name = raw.get("timezone", "UTC")
@@ -366,6 +440,7 @@ class EventbriteScraper(BaseEventScraper):
                 "location_summary": location_summary,
                 "status": status,
                 "is_canceled": is_canceled,
+                "pictureurl": pictureurl,
             }
 
             normalized.append(normalized_dict)

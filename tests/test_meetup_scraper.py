@@ -348,3 +348,55 @@ def test_meetup_extractor_resolve_event_city_us_and_ca():
     city_us = extractor_us._resolve_event_city({"venue": {"city": "New York", "state": "NY"}})
     assert city_us == "New York, NY, USA"
 
+
+def test_meetup_extractor_pictureurl_resolution():
+    extractor = MeetupExtractor(city="Vancouver, BC")
+    future_time = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
+    raw_events = [
+        {
+            "id": "1",
+            "title": "Event with featuredEventPhoto",
+            "eventUrl": "https://meetup.com/events/1/",
+            "dateTime": future_time,
+            "featuredEventPhoto": {
+                "highResUrl": "https://secure.meetupstatic.com/photos/highres_111.jpeg",
+                "baseUrl": "https://secure.meetupstatic.com/photos/base_111.jpeg",
+            },
+        },
+        {
+            "id": "2",
+            "title": "Event with displayPhoto",
+            "eventUrl": "https://meetup.com/events/2/",
+            "dateTime": future_time,
+            "displayPhoto": {
+                "highResUrl": "https://secure.meetupstatic.com/photos/highres_222.jpeg",
+            },
+        },
+        {
+            "id": "3",
+            "title": "Event with group key photo fallback",
+            "eventUrl": "https://meetup.com/events/3/",
+            "dateTime": future_time,
+            "group": {
+                "keyGroupPhoto": {
+                    "highResUrl": "https://secure.meetupstatic.com/photos/group_333.jpeg",
+                },
+            },
+        },
+        {
+            "id": "4",
+            "title": "Event with Schema.org image",
+            "eventUrl": "https://meetup.com/events/4/",
+            "dateTime": future_time,
+            "image": "https://secure.meetupstatic.com/photos/schema_444.jpeg",
+        },
+    ]
+
+    normalized = extractor.normalize_data(raw_events)
+    assert len(normalized) == 4
+    assert normalized[0]["pictureurl"] == "https://secure.meetupstatic.com/photos/highres_111.jpeg"
+    assert normalized[1]["pictureurl"] == "https://secure.meetupstatic.com/photos/highres_222.jpeg"
+    assert normalized[2]["pictureurl"] == "https://secure.meetupstatic.com/photos/group_333.jpeg"
+    assert normalized[3]["pictureurl"] == "https://secure.meetupstatic.com/photos/schema_444.jpeg"
+
+

@@ -21,6 +21,7 @@ ALL_SCHEMA_COLUMNS: Set[str] = {
     "location_summary",
     "status",
     "is_canceled",
+    "pictureurl",
     "created_at",
     "updated_at",
 }
@@ -245,6 +246,13 @@ def upsert_city_event(conn: Connection, event: CityEvent) -> Optional[int]:
         update_assignments.append("location_summary = COALESCE(EXCLUDED.location_summary, city_events.location_summary)")
         where_conditions.append("city_events.location_summary IS DISTINCT FROM COALESCE(EXCLUDED.location_summary, city_events.location_summary)")
         params["location_summary"] = event.location_summary
+
+    if "pictureurl" in cols:
+        fields.append("pictureurl")
+        values_placeholders.append("%(pictureurl)s")
+        update_assignments.append("pictureurl = COALESCE(EXCLUDED.pictureurl, city_events.pictureurl)")
+        where_conditions.append("city_events.pictureurl IS DISTINCT FROM COALESCE(EXCLUDED.pictureurl, city_events.pictureurl)")
+        params["pictureurl"] = event.pictureurl
 
     if "created_at" in cols:
         fields.append("created_at")

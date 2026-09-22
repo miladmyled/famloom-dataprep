@@ -25,6 +25,7 @@ class CityEvent(BaseModel):
     location_summary: Optional[str] = Field(default=None, description="Venue name or physical address summary")
     status: str = Field(default="live", description="Event status: live, canceled, postponed")
     is_canceled: bool = Field(default=False, description="Tombstone flag for canceled events")
+    pictureurl: Optional[str] = Field(default=None, description="Direct URL to event photo or banner image")
     tag_ids: List[int] = Field(default_factory=list, description="Matched interest tag IDs from question_values")
 
     @property
@@ -35,7 +36,7 @@ class CityEvent(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def handle_legacy_fields(cls, data: any) -> any:
-        """Maps legacy 'date' field to 'start_date' and sets default event_id if missing."""
+        """Maps legacy 'date' and picture URL fields and sets default event_id if missing."""
         if isinstance(data, dict):
             # Map legacy 'date' to 'start_date'
             if "start_date" not in data and "date" in data:
@@ -45,7 +46,26 @@ class CityEvent(BaseModel):
                 url_str = str(data["url"])
                 # Extract trailing id from URL or hash
                 data["event_id"] = f"event_{abs(hash(url_str)) % 100000000}"
+            # Map picture_url or image_url aliases to pictureurl
+            if "pictureurl" not in data or data.get("pictureurl") is None:
+                if "picture_url" in data:
+                    data["pictureurl"] = data["picture_url"]
+                elif "image_url" in data:
+                    data["pictureurl"] = data["image_url"]
+                elif "photo_url" in data:
+                    data["pictureurl"] = data["photo_url"]
         return data
+
+    @field_validator("pictureurl", mode="before")
+    @classmethod
+    def validate_picture_url(cls, v: any) -> Optional[str]:
+        """Ensures pictureurl is a stripped HTTP/HTTPS URL string or None."""
+        if v is None:
+            return None
+        v_str = str(v).strip()
+        if not v_str or not (v_str.startswith("http://") or v_str.startswith("https://")):
+            return None
+        return v_str
 
     @field_validator("start_date", "end_date", mode="before")
     @classmethod
