@@ -9,10 +9,12 @@ from src.classify.models import ClassificationResult, ClassifyInput, ProviderUna
 from src.classify.prompts import (
     ADULT_QUESTION,
     CHILDREN_QUESTION,
+    COUPLE_QUESTION,
     FAMILY_QUESTION,
     FAMILY_QUESTION_KEYS,
     KID_WELCOME_QUESTION,
     PROMPT_VERSION,
+    SINGLES_QUESTION,
     build_state_text,
     interest_question,
     language_question,
@@ -31,7 +33,7 @@ def format_when(inp: ClassifyInput) -> Optional[str]:
 class JevClassifier:
     """
     Classifies one event per request with TypeSafe Jev (Noul questions):
-    family, children, kid_welcome (family score = the strongest of the three), adult,
+    family, children, kid_welcome, couple (family score = the strongest), singles, adult,
     one question per interest and one per taggable language of the city.
     Events that fail (after the SDK's retries) are simply absent from the returned dict.
     """
@@ -91,6 +93,8 @@ class JevClassifier:
             "family": Noul(instructions=FAMILY_QUESTION),
             "children": Noul(instructions=CHILDREN_QUESTION),
             "kid_welcome": Noul(instructions=KID_WELCOME_QUESTION),
+            "couple": Noul(instructions=COUPLE_QUESTION),
+            "singles": Noul(instructions=SINGLES_QUESTION),
             "adult": Noul(instructions=ADULT_QUESTION),
         }
         for v in taxonomy.interests:
@@ -116,7 +120,7 @@ class JevClassifier:
             prompt_version=PROMPT_VERSION,
             family_score=family,
             adult_score=adult,
-            decision=decide(family, adult, self.thresholds),
+            decision=decide(family, adult, self.thresholds, answers.get("singles")),
             interest_value_ids=select_ids(taxonomy.interests, interest_probs, self.thresholds.tag),
             language_value_ids=select_ids(offered_languages, language_probs, self.thresholds.language),
             scores={k: round(float(p), 4) for k, p in answers.items()},

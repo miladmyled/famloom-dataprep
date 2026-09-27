@@ -41,7 +41,7 @@ def test_request_contains_state_and_a_question_per_taxonomy_value(taxonomy):
     assert body["state"].startswith("Title: Toddler storytime\nWhen: 2026-10-03 17:00 UTC\nWhere: Central Library\n")
     assert "City: Vancouver, BC, Canada" in body["state"]
     keys = set(body["questions"])
-    assert {"family", "children", "kid_welcome", "adult", "tag_45", "tag_42", "tag_71"} <= keys
+    assert {"family", "children", "kid_welcome", "couple", "singles", "adult", "tag_45", "tag_42", "tag_71"} <= keys
     # Vancouver: English is the primary language and 'other' is never asked
     assert "lang_501" not in keys and "lang_519" not in keys
     assert {"lang_502", "lang_503"} <= keys
@@ -78,18 +78,25 @@ def test_response_mapping_accept_with_interest_and_language(taxonomy):
     assert result.url == "https://example.com/e/e1"
 
 
-def test_adult_override_rejects_even_with_family_signal(taxonomy):
+def test_adult_content_does_not_reject_by_default(taxonomy):
     result = _classifier(lambda r: httpx2.Response(200, json=_fixture("wine_bar.json"))).classify(
         [make_input("bar")], taxonomy
     )["bar"]
-    assert result.decision == "reject"
+    assert result.adult_score == 0.86
+    assert result.decision == "review"  # family 0.55, adult score stored but not rejecting
     assert result.interest_value_ids == [71]
+
+
+def test_adult_rejection_can_be_enabled(taxonomy):
+    jev = JevClassifier(client=_client(lambda r: httpx2.Response(200, json=_fixture("wine_bar.json"))),
+                        model="jev-1.13.0", thresholds=Thresholds(adult_reject=0.6))
+    assert jev.classify([make_input("bar")], taxonomy)["bar"].decision == "reject"
 
 
 @pytest.mark.parametrize(
     "family, adult, expected",
     [(0.95, 0.1, "accept"), (0.70, 0.0, "accept"), (0.69, 0.0, "review"), (0.40, 0.0, "review"),
-     (0.39, 0.0, "reject"), (0.99, 0.60, "reject"), (None, 0.0, "review")],
+     (0.39, 0.0, "reject"), (0.99, 0.95, "accept"), (None, 0.0, "review")],
 )
 def test_decision_thresholds(family, adult, expected):
     assert decide(family, adult, Thresholds()) == expected
@@ -171,10 +178,31 @@ def test_drop_off_kids_program_accepted_via_children_question(taxonomy):
     assert _classifier(lambda r: httpx2.Response(200, json=body)).classify([make_input("camp")], taxonomy)["camp"].decision == "accept"
 
 
-def test_adult_override_beats_kid_welcome(taxonomy):
+def test_singles_event_rejected_even_if_couple_friendly(taxonomy):
+    body = {
+        "model": "jev-1.13.0",
+        "answers": {"couple": {"type": "noul", "noul": 0.8}, "singles": {"type": "noul", "noul": 0.95},
+                    "adult": {"type": "noul", "noul": 0.9}},
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+    assert _classifier(lambda r: httpx2.Response(200, json=body)).classify([make_input("speed")], taxonomy)["speed"].decision == "reject"
+
+
+def test_couple_outing_accepted_even_if_adult(taxonomy):
+    body = {
+        "model": "jev-1.13.0",
+        "answers": {"family": {"type": "noul", "noul": 0.1}, "couple": {"type": "noul", "noul": 0.9},
+                    "singles": {"type": "noul", "noul": 0.02}, "adult": {"type": "noul", "noul": 0.9}},
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+    assert _classifier(lambda r: httpx2.Response(200, json=body)).classify([make_input("paint")], taxonomy)["paint"].decision == "accept"
+
+
+def test_adult_override_beats_kid_welcome_when_enabled(taxonomy):
     body = {
         "model": "jev-1.13.0",
         "answers": {"kid_welcome": {"type": "noul", "noul": 0.9}, "adult": {"type": "noul", "noul": 0.95}},
         "usage": {"input_tokens": 1, "output_tokens": 1},
     }
-    assert _classifier(lambda r: httpx2.Response(200, json=body)).classify([make_input("pub")], taxonomy)["pub"].decision == "reject"
+    jev = JevClassifier(client=_client(lambda r: httpx2.Response(200, json=body)), model="m", thresholds=Thresholds(adult_reject=0.6))
+    assert jev.classify([make_input("pub")], taxonomy)["pub"].decision == "reject"

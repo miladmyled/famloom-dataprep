@@ -5,11 +5,14 @@ it is part of the cache key, so all events are re-classified with the new wordin
 
 from src.classify.text import strip_html
 
-PROMPT_VERSION = "2026-09-27.2"
+PROMPT_VERSION = "2026-09-27.3"
 
-# An event is family-relevant when ANY of these three is true (option B, decided 2026-09-27):
-# a family outing, a program for children (including drop-off), or a public event where
-# bringing children is reasonable. The adult question still rejects regardless.
+# FamLoom families include couples without children and same-sex couples (decided 2026-09-27).
+# An event is family-relevant when ANY of these four is true: a family outing with children,
+# a program for children (including drop-off), a public event where bringing children is
+# reasonable, or a leisure/social outing a couple could enjoy together. Singles/dating events
+# are rejected; the adult question is stored but does not reject unless ADULT_REJECT_THRESHOLD
+# is set.
 FAMILY_QUESTION = (
     "Families with children would attend this event together, and it is suitable and "
     "appealing for children."
@@ -26,7 +29,20 @@ KID_WELCOME_QUESTION = (
     "exhibition, sports game or community day. Not a social meetup organised for adults."
 )
 
-FAMILY_QUESTION_KEYS = ("family", "children", "kid_welcome")
+COUPLE_QUESTION = (
+    "Two adult partners (a couple of any gender, with or without children) could attend this "
+    "event together as a leisure or social outing, for example a dance night, film screening, "
+    "art or painting class, tasting, tour, concert, show, sports game, market or festival. "
+    "Not a business, networking, sales, job or professional training event, not a service "
+    "appointment, and not a therapy or support group session."
+)
+
+SINGLES_QUESTION = (
+    "The event is meant for single people looking to date or meet a romantic partner, for "
+    "example speed dating or a singles mixer."
+)
+
+FAMILY_QUESTION_KEYS = ("family", "children", "kid_welcome", "couple")
 
 ADULT_QUESTION = (
     "The event is intended for adults only (for example 18+/19+, bar or nightclub event, "

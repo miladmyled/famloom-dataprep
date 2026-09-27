@@ -16,7 +16,9 @@ def _env_float(name: str, default: float) -> float:
 class Thresholds:
     family_accept: float = 0.70
     family_review: float = 0.40
-    adult_reject: float = 0.60
+    # Adult-only content is welcome (couples are families); > 1 disables the adult rejection.
+    adult_reject: float = 1.01
+    singles_reject: float = 0.60
     tag: float = 0.60
     language: float = 0.60
 
@@ -25,14 +27,21 @@ class Thresholds:
         return cls(
             family_accept=_env_float("FAMILY_ACCEPT_THRESHOLD", 0.70),
             family_review=_env_float("FAMILY_REVIEW_THRESHOLD", 0.40),
-            adult_reject=_env_float("ADULT_REJECT_THRESHOLD", 0.60),
+            adult_reject=_env_float("ADULT_REJECT_THRESHOLD", 1.01),
+            singles_reject=_env_float("SINGLES_REJECT_THRESHOLD", 0.60),
             tag=_env_float("TAG_THRESHOLD", 0.60),
             language=_env_float("LANGUAGE_THRESHOLD", 0.60),
         )
 
 
-def decide(family: Optional[float], adult: Optional[float], t: Thresholds) -> Decision:
-    """adult >= adult_reject -> reject; family >= accept -> accept; family < review -> reject; else review."""
+def decide(family: Optional[float], adult: Optional[float], t: Thresholds, singles: Optional[float] = None) -> Decision:
+    """
+    singles >= singles_reject -> reject (a couple would not attend a dating event together);
+    adult >= adult_reject -> reject (disabled by default);
+    family >= accept -> accept; family < review -> reject; else review.
+    """
+    if singles is not None and singles >= t.singles_reject:
+        return "reject"
     if adult is not None and adult >= t.adult_reject:
         return "reject"
     if family is None:
@@ -45,7 +54,7 @@ def decide(family: Optional[float], adult: Optional[float], t: Thresholds) -> De
 
 
 def combined_family_score(answers: Dict[str, float], keys: Iterable[str]) -> Optional[float]:
-    """Family relevance = the strongest of the family / children / kid-welcome answers."""
+    """Family relevance = the strongest of the family / children / kid-welcome / couple answers."""
     values = [answers[k] for k in keys if answers.get(k) is not None]
     return max(values) if values else None
 

@@ -14,10 +14,12 @@ from src.classify.models import ClassificationResult, ClassifyInput, ProviderUna
 from src.classify.prompts import (
     ADULT_QUESTION,
     CHILDREN_QUESTION,
+    COUPLE_QUESTION,
     FAMILY_QUESTION,
     FAMILY_QUESTION_KEYS,
     KID_WELCOME_QUESTION,
     PROMPT_VERSION,
+    SINGLES_QUESTION,
     build_state_text,
 )
 from src.classify.taxonomy import Taxonomy
@@ -135,11 +137,13 @@ CLASSIFY_SCHEMA: Dict[str, Any] = {
                     "family_score": {"type": "number", "minimum": 0, "maximum": 1},
                     "children_score": {"type": "number", "minimum": 0, "maximum": 1},
                     "kid_welcome_score": {"type": "number", "minimum": 0, "maximum": 1},
+                    "couple_score": {"type": "number", "minimum": 0, "maximum": 1},
+                    "singles_score": {"type": "number", "minimum": 0, "maximum": 1},
                     "adult_score": {"type": "number", "minimum": 0, "maximum": 1},
                     "interest_value_ids": {"type": "array", "items": {"type": "integer"}},
                     "language_value_ids": {"type": "array", "items": {"type": "integer"}},
                 },
-                "required": ["event_id", "family_score", "children_score", "kid_welcome_score", "adult_score", "interest_value_ids", "language_value_ids"],
+                "required": ["event_id", "family_score", "children_score", "kid_welcome_score", "couple_score", "singles_score", "adult_score", "interest_value_ids", "language_value_ids"],
             },
         }
     },
@@ -173,6 +177,8 @@ class GeminiClassifier:
             f"- family_score (0..1): probability that this is true: \"{FAMILY_QUESTION}\"\n"
             f"- children_score (0..1): probability that this is true: \"{CHILDREN_QUESTION}\"\n"
             f"- kid_welcome_score (0..1): probability that this is true: \"{KID_WELCOME_QUESTION}\"\n"
+            f"- couple_score (0..1): probability that this is true: \"{COUPLE_QUESTION}\"\n"
+            f"- singles_score (0..1): probability that this is true: \"{SINGLES_QUESTION}\"\n"
             f"- adult_score (0..1): probability that this is true: \"{ADULT_QUESTION}\"\n"
             "- interest_value_ids: ids from the interest list that the event is clearly about or strongly involves.\n"
             "- language_value_ids: ids from that event's allowed language ids only, when the event is held fully "
@@ -189,7 +195,7 @@ class GeminiClassifier:
             except (TypeError, ValueError):
                 return None
 
-        parts = {"family": score("family_score"), "children": score("children_score"), "kid_welcome": score("kid_welcome_score")}
+        parts = {"family": score("family_score"), "children": score("children_score"), "kid_welcome": score("kid_welcome_score"), "couple": score("couple_score")}
         family, adult = combined_family_score(parts, FAMILY_QUESTION_KEYS), score("adult_score")
         interest_ok = taxonomy.ids("interests")
         language_ok = {v.value_id for v in taxonomy.languages_for_city(inp.city)}
@@ -204,10 +210,10 @@ class GeminiClassifier:
             prompt_version=PROMPT_VERSION,
             family_score=family,
             adult_score=adult,
-            decision=decide(family, adult, self.thresholds),
+            decision=decide(family, adult, self.thresholds, score("singles_score")),
             interest_value_ids=interests,
             language_value_ids=languages,
-            scores={k: v for k, v in list(parts.items()) + [("adult", adult)] if v is not None},
+            scores={k: v for k, v in list(parts.items()) + [("adult", adult), ("singles", score("singles_score"))] if v is not None},
             source=inp.source,
             city=inp.city,
             title=inp.title,
