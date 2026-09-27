@@ -28,13 +28,12 @@ from src.classify.factory import get_classifier
 from src.classify.stage import classify_events
 from src.classify.taxonomy import get_active_taxonomy
 from src.config.database import get_db_pool
-from src.etl.dedupe import dedupe_events
+from src.etl.dedupe import dedupe_events, load_existing_events
 from src.etl.transformer import clean_and_validate_event
 
-SOURCES = {
-    "eventbrite": ("Eventbrite", lambda city: __import__("src.etl.eventbrite", fromlist=["x"]).EventbriteScraper(city=city)),
-    "meetup": ("Meetup", lambda city: __import__("src.etl.meetup_public", fromlist=["x"]).MeetupExtractor(city=city)),
-}
+# --sources value -> source kind used by main.build_scraper_tasks
+SOURCES = {"eventbrite": "eventbrite", "meetup": "meetup", "curated": "curated", "web": "web", "facebook": "facebook_snippet"}
+FLAG_FOR = {"curated": "CURATED_CALENDARS_ENABLED", "web": "WEB_SEARCH_ENABLED", "facebook": "FACEBOOK_SNIPPETS_ENABLED"}
 
 
 class _NoWriteCache(ClassificationCache):
@@ -77,6 +76,15 @@ def main() -> int:
         if unknown:
             parser.error(f"unknown sources: {unknown}")
 
+        # the requested sources are switched on for this run only; everything else off
+        import os
+
+        for key, flag in FLAG_FOR.items():
+            os.environ[flag] = "true" if key in sources else "false"
+        from main import SharedWebClients, build_scraper_tasks
+
+        shared = SharedWebClients(pool)
+        wanted = {SOURCES[s] for s in sources}
         taxonomy = get_active_taxonomy(pool)
         chain = get_classifier()
         cache = (_NoWriteCache if args.no_cache_write else ClassificationCache)(pool)
@@ -91,15 +99,18 @@ def main() -> int:
         rows, metrics = [], defaultdict(Counter)
         for city in cities:
             events = []
-            for key in sources:
-                label, factory = SOURCES[key]
-                scraper = factory(city)
+            for _name, kind, scraper in build_scraper_tasks(city, shared):
+                if kind not in wanted:
+                    continue
                 raw = scraper.fetch_raw_events()
                 valid = [e for e in (clean_and_validate_event(r) for r in scraper.normalize_data(raw)) if e is not None]
-                metrics[label]["raw"] += len(raw)
-                metrics[label]["valid"] += len(valid)
+                valid = [e if e.origin else e.model_copy(update={"origin": kind}) for e in valid]
+                metrics[kind]["raw"] += len(raw)
+                metrics[kind]["valid"] += len(valid)
+                for key, value in (getattr(scraper, "metrics", None) or {}).items():
+                    metrics[kind][f"src:{key}"] += value
                 events.extend(valid)
-            events, dups = dedupe_events(events)
+            events, dups = dedupe_events(events, load_existing_events(pool, city))
             for src, n in dups.items():
                 metrics[src]["duplicates"] += n
             stage = classify_events(events, chain, cache, taxonomy)
@@ -109,7 +120,7 @@ def main() -> int:
             if producer:
                 for event in stage.publish:
                     if producer.publish_event(event):
-                        metrics[event.source]["queued"] += 1
+                        metrics[event.origin or event.source]["queued"] += 1
             if args.publish_direct and stage.publish:
                 from src.db.events import upsert_city_event
                 from src.models.event import CityEvent
@@ -119,7 +130,7 @@ def main() -> int:
                         for event in stage.publish:
                             message = event.model_dump_json()  # the Kafka payload
                             upsert_city_event(conn, CityEvent.model_validate_json(message))
-                            metrics[event.source]["queued"] += 1
+                            metrics[event.origin or event.source]["queued"] += 1
             for event in events:
                 r = stage.results.get(event.event_id)
                 rows.append({
@@ -153,9 +164,12 @@ def main() -> int:
     keys = ("raw", "valid", "duplicates", "cache_hits", "classified", "accepted", "review", "rejected", "canceled", "classifier_errors", "queued")
     mode_name = "PUBLISH (Kafka)" if args.publish else "PUBLISH-DIRECT (dev DB)" if args.publish_direct else "no-publish"
     print(f"\nClassifier chain: {' -> '.join(chain.names)}    mode: {mode_name}")
-    print(f"{'source':<12}" + "".join(f"{k[:10]:>11}" for k in keys))
+    print(f"{'source':<17}" + "".join(f"{k[:10]:>11}" for k in keys))
     for src in sorted(metrics):
-        print(f"{src:<12}" + "".join(f"{metrics[src].get(k, 0):>11}" for k in keys))
+        print(f"{src:<17}" + "".join(f"{metrics[src].get(k, 0):>11}" for k in keys))
+        extra = {k[4:]: v for k, v in metrics[src].items() if k.startswith("src:")}
+        if extra:
+            print(f"{'':<17}source detail: {extra}")
 
     sample = random.Random(7).sample(rows, min(args.samples, len(rows)))
     print(f"\n{len(sample)} sample decisions:")

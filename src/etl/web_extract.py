@@ -100,8 +100,12 @@ def main_text(html: str, max_chars: int = 12000) -> str:
     soup = soup_of(html)
     for tag in soup(["script", "style", "noscript", "svg", "nav", "header", "footer", "form", "iframe"]):
         tag.decompose()
-    root = soup.find("main") or soup.find(attrs={"role": "main"}) or soup.body or soup
+    body = soup.body or soup
+    root = soup.find("main") or soup.find(attrs={"role": "main"}) or body
     text = _WS_RE.sub(" ", root.get_text(" ", strip=True))
+    if root is not body and len(text) < 500:
+        # some sites keep only a banner inside <main> and render the listing elsewhere
+        text = _WS_RE.sub(" ", body.get_text(" ", strip=True))
     return text[:max_chars]
 
 

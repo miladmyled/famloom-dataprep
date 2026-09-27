@@ -241,7 +241,7 @@ class PoliteHttpClient:
                 page.route("**/*", lambda route: route.abort() if (
                     is_blocked_domain(host_of(route.request.url)) or route.request.resource_type in ("image", "media", "font")
                 ) else route.continue_())
-                resp = page.goto(url, wait_until="domcontentloaded", timeout=int(self.timeout * 1000))
+                resp = page.goto(url, wait_until="domcontentloaded", timeout=int(max(self.timeout, 45.0) * 1000))
                 page.wait_for_timeout(wait_ms)
                 html = page.content()
                 if len(html.encode("utf-8")) > self.max_bytes:
