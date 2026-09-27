@@ -83,7 +83,7 @@ def test_adult_content_does_not_reject_by_default(taxonomy):
         [make_input("bar")], taxonomy
     )["bar"]
     assert result.adult_score == 0.86
-    assert result.decision == "review"  # family 0.55, adult score stored but not rejecting
+    assert result.decision == "accept"  # family 0.55 >= 0.50; adult score stored but not rejecting
     assert result.interest_value_ids == [71]
 
 
@@ -95,7 +95,7 @@ def test_adult_rejection_can_be_enabled(taxonomy):
 
 @pytest.mark.parametrize(
     "family, adult, expected",
-    [(0.95, 0.1, "accept"), (0.70, 0.0, "accept"), (0.69, 0.0, "review"), (0.40, 0.0, "review"),
+    [(0.95, 0.1, "accept"), (0.50, 0.0, "accept"), (0.49, 0.0, "review"), (0.40, 0.0, "review"),
      (0.39, 0.0, "reject"), (0.99, 0.95, "accept"), (None, 0.0, "review")],
 )
 def test_decision_thresholds(family, adult, expected):

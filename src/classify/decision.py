@@ -14,22 +14,23 @@ def _env_float(name: str, default: float) -> float:
 
 @dataclass(frozen=True)
 class Thresholds:
-    family_accept: float = 0.70
+    # Tuned at GATE 1a (2026-09-27) on 100 reviewed events: precision 0.99, recall 0.94.
+    family_accept: float = 0.50
     family_review: float = 0.40
     # Adult-only content is welcome (couples are families); > 1 disables the adult rejection.
     adult_reject: float = 1.01
     singles_reject: float = 0.60
-    tag: float = 0.60
+    tag: float = 0.70
     language: float = 0.60
 
     @classmethod
     def from_env(cls) -> "Thresholds":
         return cls(
-            family_accept=_env_float("FAMILY_ACCEPT_THRESHOLD", 0.70),
+            family_accept=_env_float("FAMILY_ACCEPT_THRESHOLD", 0.50),
             family_review=_env_float("FAMILY_REVIEW_THRESHOLD", 0.40),
             adult_reject=_env_float("ADULT_REJECT_THRESHOLD", 1.01),
             singles_reject=_env_float("SINGLES_REJECT_THRESHOLD", 0.60),
-            tag=_env_float("TAG_THRESHOLD", 0.60),
+            tag=_env_float("TAG_THRESHOLD", 0.70),
             language=_env_float("LANGUAGE_THRESHOLD", 0.60),
         )
 

@@ -39,7 +39,7 @@ def _band(score: str) -> str:
 def build_sample(n: int, reports, seed: int) -> None:
     rows, seen = [], set()
     for path in reports:
-        for r in csv.DictReader(open(path, encoding="utf-8")):
+        for r in csv.DictReader(open(path, encoding="utf-8-sig")):
             if r["url"] in seen or r["decision"] in ("canceled", "unclassified"):
                 continue
             seen.add(r["url"])
@@ -80,7 +80,7 @@ def evaluate(path: str) -> int:
     from src.classify.taxonomy import get_active_taxonomy
     from src.config.database import get_db_pool
 
-    labeled = [r for r in csv.DictReader(open(path, encoding="utf-8")) if r["family_label"].strip().lower() in ("yes", "no")]
+    labeled = [r for r in csv.DictReader(open(path, encoding="utf-8-sig")) if r["family_label"].strip().lower() in ("yes", "no")]
     if not labeled:
         sys.exit("No rows with family_label yes/no yet.")
     _common.require_dev_db()

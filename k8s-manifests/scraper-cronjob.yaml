@@ -44,6 +44,17 @@ spec:
               value: "jev-1.13.0"
             - name: REVIEW_POLICY
               value: "drop"
+            # Decision thresholds approved at GATE 1a (2026-09-27)
+            - name: FAMILY_ACCEPT_THRESHOLD
+              value: "0.50"
+            - name: FAMILY_REVIEW_THRESHOLD
+              value: "0.40"
+            - name: TAG_THRESHOLD
+              value: "0.70"
+            - name: LANGUAGE_THRESHOLD
+              value: "0.60"
+            - name: SINGLES_REJECT_THRESHOLD
+              value: "0.60"
             # Injects Kafka and Azure PostgreSQL credentials, TYPESAFE_API_KEY, GEMINI_API_KEY, GEMINI_MODEL
             envFrom:
             - secretRef:
