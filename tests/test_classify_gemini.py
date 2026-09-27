@@ -100,3 +100,36 @@ def test_missing_key_or_model_is_unavailable(monkeypatch):
     monkeypatch.delenv("GEMINI_MODEL", raising=False)
     with pytest.raises(ProviderUnavailable):
         GeminiClient()
+
+
+def test_extractor_converts_local_time_to_utc_and_drops_incomplete(monkeypatch):
+    from zoneinfo import ZoneInfo
+    from src.classify.gemini import GeminiExtractor
+
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    body = {"candidates": [{"content": {"parts": [{"text": json.dumps({"events": [
+        {"title": "Pancake breakfast", "start_local": "2026-10-03T09:00", "end_local": "2026-10-03T11:00",
+         "location_summary": "Riverside CC", "description_short": "x" * 400, "event_url": "", "confidence": 0.9},
+        {"title": "No place", "start_local": "2026-10-03T09:00", "location_summary": "", "confidence": 0.9},
+        {"title": "Bad date", "start_local": "someday", "location_summary": "Park", "confidence": 0.9},
+    ]})}]}}]}
+    client, session = _client([_response(200, body=body)])
+    events = GeminiExtractor(client=client).extract("text", __import__("datetime").datetime(2026, 9, 28), "Vancouver", ZoneInfo("America/Vancouver"))
+    assert [e["title"] for e in events] == ["Pancake breakfast"]
+    assert events[0]["start_date"].isoformat() == "2026-10-03T16:00:00+00:00"
+    assert len(events[0]["description"]) == 300 and events[0]["event_url"] is None
+    prompt = session.post.call_args[1]["json"]["contents"][0]["parts"][0]["text"]
+    assert "never copied" in prompt and "skip online-only" in prompt and "Reference date" in prompt
+
+
+def test_extractor_stops_after_quota(monkeypatch):
+    from zoneinfo import ZoneInfo
+    from src.classify.gemini import GeminiExtractor
+
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    client, session = _client([_response(429, "quota_per_day.json")])
+    ex = GeminiExtractor(client=client)
+    tz = ZoneInfo("America/Vancouver")
+    assert ex.extract("a", __import__("datetime").datetime(2026, 9, 28), "V", tz) == []
+    assert ex.extract("b", __import__("datetime").datetime(2026, 9, 28), "V", tz) == []
+    assert session.post.call_count == 1

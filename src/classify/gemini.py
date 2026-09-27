@@ -4,6 +4,7 @@ import os
 import random
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -241,3 +242,103 @@ class GeminiClassifier:
                     results[inp.event_id] = self.to_result(inp, taxonomy, item)
         logger.info(f"[GEMINI] Classified {len(results)}/{len(inputs)} events.")
         return results
+
+
+EXTRACT_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "events": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "start_local": {"type": "string", "description": "YYYY-MM-DDTHH:MM in the event's local time"},
+                    "end_local": {"type": "string"},
+                    "location_summary": {"type": "string"},
+                    "description_short": {"type": "string"},
+                    "event_url": {"type": "string"},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                },
+                "required": ["title", "start_local", "location_summary", "confidence"],
+            },
+        }
+    },
+    "required": ["events"],
+}
+
+
+class GeminiExtractor:
+    """
+    Turns free text (a calendar page, a search snippet, a caption) into dated events.
+    Rules given to the model: explicit or resolvable dates only, nearest future date inside the
+    window when the year is missing, no event without a date and a place, a neutral summary of
+    its own (never copied text), online-only events excluded. Local times are converted to UTC here.
+    """
+
+    def __init__(self, client: Optional[GeminiClient] = None, window_days: int = 14, max_chars: int = 12000):
+        self.client = client or GeminiClient()
+        self.window_days = window_days
+        self.max_chars = max_chars
+        self.quota_exhausted = False
+
+    def build_prompt(self, text: str, reference: datetime, city: str, tz_name: str, source_url: Optional[str]) -> str:
+        return (
+            "Extract the specific upcoming events described in the text below.\n"
+            f"Reference date (today at the source): {reference.strftime('%A %Y-%m-%d')}. City: {city}. Time zone: {tz_name}.\n"
+            f"Only events starting between the reference date and {self.window_days} days after it.\n"
+            "Rules:\n"
+            "- Dates must be explicit or clearly resolvable from the reference date (e.g. 'this Saturday'). "
+            "If the year is missing, use the nearest future date inside the window. Never guess a date.\n"
+            "- start_local/end_local as YYYY-MM-DDTHH:MM in the local time zone; if no time is given use 00:00 and "
+            "lower the confidence.\n"
+            "- Require a physical place (venue or address) in or near the city; skip online-only events.\n"
+            "- A recurring event: list each date inside the window separately.\n"
+            "- description_short: your own neutral one- or two-sentence summary, max 300 characters, never copied "
+            "text; do not include names of private individuals.\n"
+            "- event_url: the event's own link if present in the text, else empty.\n"
+            "- Return an empty list when there is no dated event.\n"
+            + (f"Source page: {source_url}\n" if source_url else "")
+            + "\nText:\n" + text[: self.max_chars]
+        )
+
+    def to_utc(self, value: Optional[str], tz) -> Optional[datetime]:
+        if not value:
+            return None
+        try:
+            local = datetime.fromisoformat(value.strip().replace("Z", ""))
+        except ValueError:
+            return None
+        if local.tzinfo is None:
+            local = local.replace(tzinfo=tz)
+        return local.astimezone(timezone.utc)
+
+    def extract(self, text: str, reference: datetime, city: str, tz, source_url: Optional[str] = None) -> List[Dict[str, Any]]:
+        if self.quota_exhausted or not (text or "").strip():
+            return []
+        try:
+            payload = self.client.generate_json(self.build_prompt(text, reference, city, str(tz), source_url), EXTRACT_SCHEMA)
+        except GeminiQuotaExhausted as err:
+            self.quota_exhausted = True
+            logger.warning(f"[GEMINI] Extraction quota exhausted ({err}); remaining pages retry next run.")
+            return []
+        except Exception as err:
+            logger.warning(f"[GEMINI] Extraction failed for {source_url or 'text'}: {type(err).__name__}: {err}")
+            return []
+        events = []
+        for item in payload.get("events") or []:
+            start = self.to_utc(item.get("start_local"), tz)
+            place = (item.get("location_summary") or "").strip()
+            title = (item.get("title") or "").strip()
+            if not start or not place or not title:
+                continue
+            events.append({
+                "title": title[:240],
+                "start_date": start,
+                "end_date": self.to_utc(item.get("end_local"), tz),
+                "location_summary": place,
+                "description": (item.get("description_short") or "").strip()[:300] or None,
+                "event_url": (item.get("event_url") or "").strip() or None,
+                "confidence": float(item.get("confidence") or 0),
+            })
+        return events
