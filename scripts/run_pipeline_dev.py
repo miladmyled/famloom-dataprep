@@ -9,6 +9,9 @@ Dev end-to-end run of the scraper flow for chosen cities and sources.
   cache (city_event_classifications) unless --no-cache-write is given; nothing is sent to Kafka.
 --publish: additionally publishes accepted events to KAFKA_BOOTSTRAP_SERVERS, which must be an
   approved dev/local broker (see scripts/_common.py). Refuses the production database.
+--publish-direct: no broker needed. Each accepted event is serialized exactly like the Kafka
+  message, parsed back like the consumer does, and written to the dev database with the
+  consumer's upsert (city_events + managed tag replacement), one transaction per city.
 Replaces scripts/test_pipeline.py for dev runs (that file still works as a quick smoke test).
 """
 import argparse
@@ -50,6 +53,7 @@ def main() -> int:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--no-publish", action="store_true", default=True)
     mode.add_argument("--publish", action="store_true")
+    mode.add_argument("--publish-direct", action="store_true", help="write accepted events to the dev DB via the consumer code path, no Kafka")
     parser.add_argument("--no-cache-write", action="store_true", help="do not save classifications to the dev cache")
     parser.add_argument("--samples", type=int, default=20, help="sample decisions to print")
     args = parser.parse_args()
@@ -106,6 +110,16 @@ def main() -> int:
                 for event in stage.publish:
                     if producer.publish_event(event):
                         metrics[event.source]["queued"] += 1
+            if args.publish_direct and stage.publish:
+                from src.db.events import upsert_city_event
+                from src.models.event import CityEvent
+
+                with pool.connection() as conn:
+                    with conn.transaction():
+                        for event in stage.publish:
+                            message = event.model_dump_json()  # the Kafka payload
+                            upsert_city_event(conn, CityEvent.model_validate_json(message))
+                            metrics[event.source]["queued"] += 1
             for event in events:
                 r = stage.results.get(event.event_id)
                 rows.append({
@@ -137,7 +151,8 @@ def main() -> int:
         writer.writerows(rows)
 
     keys = ("raw", "valid", "duplicates", "cache_hits", "classified", "accepted", "review", "rejected", "canceled", "classifier_errors", "queued")
-    print(f"\nClassifier chain: {' -> '.join(chain.names)}    mode: {'PUBLISH' if args.publish else 'no-publish'}")
+    mode_name = "PUBLISH (Kafka)" if args.publish else "PUBLISH-DIRECT (dev DB)" if args.publish_direct else "no-publish"
+    print(f"\nClassifier chain: {' -> '.join(chain.names)}    mode: {mode_name}")
     print(f"{'source':<12}" + "".join(f"{k[:10]:>11}" for k in keys))
     for src in sorted(metrics):
         print(f"{src:<12}" + "".join(f"{metrics[src].get(k, 0):>11}" for k in keys))

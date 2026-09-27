@@ -110,3 +110,17 @@ def test_content_hash_saved_on_results(taxonomy):
     event = make_event("e1")
     _, cache = _run([event], FakeProvider("jev"), taxonomy=taxonomy)
     assert cache.rows["e1"].content_hash == content_hash(to_input(event), taxonomy.hash)
+
+
+def test_cache_hit_applies_current_thresholds_and_saves_change(taxonomy):
+    from src.classify.decision import Thresholds
+
+    event = make_event("e1")
+    provider = FakeProvider("jev", {"e1": {"decision": "review", "family": 0.55, "interests": [42]}})
+    _, cache = _run([event], provider, taxonomy=taxonomy)
+    cache.rows["e1"].scores = {"family": 0.55, "adult": 0.1, "tag_42": 0.65, "tag_45": 0.95, "lang_503": 0.9}
+    out = classify_events([event], ClassifierChain([FakeProvider("jev")]), cache, taxonomy, "drop",
+                          thresholds=Thresholds(family_accept=0.50, tag=0.70))
+    assert [e.event_id for e in out.publish] == ["e1"]
+    assert out.publish[0].tag_ids == [45, 503]          # 42 (0.65) dropped at 0.70, 45 added
+    assert cache.rows["e1"].decision == "accept"         # written back for the janitor
