@@ -5,12 +5,28 @@ it is part of the cache key, so all events are re-classified with the new wordin
 
 from src.classify.text import strip_html
 
-PROMPT_VERSION = "2026-09-27.1"
+PROMPT_VERSION = "2026-09-27.2"
 
+# An event is family-relevant when ANY of these three is true (option B, decided 2026-09-27):
+# a family outing, a program for children (including drop-off), or a public event where
+# bringing children is reasonable. The adult question still rejects regardless.
 FAMILY_QUESTION = (
     "Families with children would attend this event together, and it is suitable and "
     "appealing for children."
 )
+
+CHILDREN_QUESTION = (
+    "The event is designed for children or teens, for example a kids' class, camp, club, "
+    "storytime, show or drop-off program."
+)
+
+KID_WELCOME_QUESTION = (
+    "This is a public event where children are welcome and it would be reasonable for parents "
+    "to bring them, for example an open community walk or run, market, festival, parade, "
+    "exhibition, sports game or community day. Not a social meetup organised for adults."
+)
+
+FAMILY_QUESTION_KEYS = ("family", "children", "kid_welcome")
 
 ADULT_QUESTION = (
     "The event is intended for adults only (for example 18+/19+, bar or nightclub event, "

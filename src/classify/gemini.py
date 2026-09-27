@@ -8,12 +8,15 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from src.classify.decision import Thresholds, decide
+from src.classify.decision import Thresholds, combined_family_score, decide
 from src.classify.jev import format_when
 from src.classify.models import ClassificationResult, ClassifyInput, ProviderUnavailable
 from src.classify.prompts import (
     ADULT_QUESTION,
+    CHILDREN_QUESTION,
     FAMILY_QUESTION,
+    FAMILY_QUESTION_KEYS,
+    KID_WELCOME_QUESTION,
     PROMPT_VERSION,
     build_state_text,
 )
@@ -130,11 +133,13 @@ CLASSIFY_SCHEMA: Dict[str, Any] = {
                 "properties": {
                     "event_id": {"type": "string"},
                     "family_score": {"type": "number", "minimum": 0, "maximum": 1},
+                    "children_score": {"type": "number", "minimum": 0, "maximum": 1},
+                    "kid_welcome_score": {"type": "number", "minimum": 0, "maximum": 1},
                     "adult_score": {"type": "number", "minimum": 0, "maximum": 1},
                     "interest_value_ids": {"type": "array", "items": {"type": "integer"}},
                     "language_value_ids": {"type": "array", "items": {"type": "integer"}},
                 },
-                "required": ["event_id", "family_score", "adult_score", "interest_value_ids", "language_value_ids"],
+                "required": ["event_id", "family_score", "children_score", "kid_welcome_score", "adult_score", "interest_value_ids", "language_value_ids"],
             },
         }
     },
@@ -166,6 +171,8 @@ class GeminiClassifier:
         return (
             "You classify city events for a family app. For EACH event return:\n"
             f"- family_score (0..1): probability that this is true: \"{FAMILY_QUESTION}\"\n"
+            f"- children_score (0..1): probability that this is true: \"{CHILDREN_QUESTION}\"\n"
+            f"- kid_welcome_score (0..1): probability that this is true: \"{KID_WELCOME_QUESTION}\"\n"
             f"- adult_score (0..1): probability that this is true: \"{ADULT_QUESTION}\"\n"
             "- interest_value_ids: ids from the interest list that the event is clearly about or strongly involves.\n"
             "- language_value_ids: ids from that event's allowed language ids only, when the event is held fully "
@@ -182,7 +189,8 @@ class GeminiClassifier:
             except (TypeError, ValueError):
                 return None
 
-        family, adult = score("family_score"), score("adult_score")
+        parts = {"family": score("family_score"), "children": score("children_score"), "kid_welcome": score("kid_welcome_score")}
+        family, adult = combined_family_score(parts, FAMILY_QUESTION_KEYS), score("adult_score")
         interest_ok = taxonomy.ids("interests")
         language_ok = {v.value_id for v in taxonomy.languages_for_city(inp.city)}
         interests = sorted({int(i) for i in item.get("interest_value_ids") or [] if str(i).lstrip("-").isdigit() and int(i) in interest_ok})
@@ -199,7 +207,7 @@ class GeminiClassifier:
             decision=decide(family, adult, self.thresholds),
             interest_value_ids=interests,
             language_value_ids=languages,
-            scores={k: v for k, v in (("family", family), ("adult", adult)) if v is not None},
+            scores={k: v for k, v in list(parts.items()) + [("adult", adult)] if v is not None},
             source=inp.source,
             city=inp.city,
             title=inp.title,

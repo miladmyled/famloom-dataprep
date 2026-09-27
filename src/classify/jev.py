@@ -4,11 +4,14 @@ import os
 import time
 from typing import Dict, List, Optional
 
-from src.classify.decision import Thresholds, decide, select_ids
+from src.classify.decision import Thresholds, combined_family_score, decide, select_ids
 from src.classify.models import ClassificationResult, ClassifyInput, ProviderUnavailable
 from src.classify.prompts import (
     ADULT_QUESTION,
+    CHILDREN_QUESTION,
     FAMILY_QUESTION,
+    FAMILY_QUESTION_KEYS,
+    KID_WELCOME_QUESTION,
     PROMPT_VERSION,
     build_state_text,
     interest_question,
@@ -28,7 +31,8 @@ def format_when(inp: ClassifyInput) -> Optional[str]:
 class JevClassifier:
     """
     Classifies one event per request with TypeSafe Jev (Noul questions):
-    family, adult, one question per interest and one per taggable language of the city.
+    family, children, kid_welcome (family score = the strongest of the three), adult,
+    one question per interest and one per taggable language of the city.
     Events that fail (after the SDK's retries) are simply absent from the returned dict.
     """
 
@@ -85,6 +89,8 @@ class JevClassifier:
 
         questions: Dict[str, object] = {
             "family": Noul(instructions=FAMILY_QUESTION),
+            "children": Noul(instructions=CHILDREN_QUESTION),
+            "kid_welcome": Noul(instructions=KID_WELCOME_QUESTION),
             "adult": Noul(instructions=ADULT_QUESTION),
         }
         for v in taxonomy.interests:
@@ -96,7 +102,7 @@ class JevClassifier:
     # ---- response mapping -------------------------------------------------------------------
 
     def to_result(self, inp: ClassifyInput, taxonomy: Taxonomy, answers: Dict[str, float], model_version: str) -> ClassificationResult:
-        family = answers.get("family")
+        family = combined_family_score(answers, FAMILY_QUESTION_KEYS)
         adult = answers.get("adult")
         interest_probs = {v.value_id: answers.get(f"tag_{v.value_id}", 0.0) for v in taxonomy.interests}
         offered_languages = taxonomy.languages_for_city(inp.city)
@@ -138,7 +144,7 @@ class JevClassifier:
             model=self.model,
         )
         answers = self.extract_answers(response)
-        if "family" not in answers or "adult" not in answers:
+        if "adult" not in answers or not any(k in answers for k in FAMILY_QUESTION_KEYS):
             raise ValueError(f"Jev response for {inp.event_id} is missing family/adult answers")
         return self.to_result(inp, taxonomy, answers, getattr(response, "model", None) or self.model)
 

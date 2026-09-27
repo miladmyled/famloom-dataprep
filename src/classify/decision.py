@@ -44,6 +44,12 @@ def decide(family: Optional[float], adult: Optional[float], t: Thresholds) -> De
     return "review"
 
 
+def combined_family_score(answers: Dict[str, float], keys: Iterable[str]) -> Optional[float]:
+    """Family relevance = the strongest of the family / children / kid-welcome answers."""
+    values = [answers[k] for k in keys if answers.get(k) is not None]
+    return max(values) if values else None
+
+
 def select_ids(
     values: Iterable[TaxonomyValue], probabilities: Dict[int, float], threshold: float
 ) -> List[int]:

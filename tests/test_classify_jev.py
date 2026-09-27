@@ -41,7 +41,7 @@ def test_request_contains_state_and_a_question_per_taxonomy_value(taxonomy):
     assert body["state"].startswith("Title: Toddler storytime\nWhen: 2026-10-03 17:00 UTC\nWhere: Central Library\n")
     assert "City: Vancouver, BC, Canada" in body["state"]
     keys = set(body["questions"])
-    assert {"family", "adult", "tag_45", "tag_42", "tag_71"} <= keys
+    assert {"family", "children", "kid_welcome", "adult", "tag_45", "tag_42", "tag_71"} <= keys
     # Vancouver: English is the primary language and 'other' is never asked
     assert "lang_501" not in keys and "lang_519" not in keys
     assert {"lang_502", "lang_503"} <= keys
@@ -138,3 +138,43 @@ def test_missing_key_means_provider_unavailable(monkeypatch):
 def test_time_budget_skips_remaining_events(taxonomy):
     jev = _classifier(lambda r: httpx2.Response(200, json=_fixture("storytime_persian.json")), time_budget_seconds=1e-9)
     assert jev.classify([make_input("e1"), make_input("e2")], taxonomy) == {}
+
+
+def test_family_relevance_is_the_strongest_of_family_children_and_kid_welcome(taxonomy):
+    body = {
+        "model": "jev-1.13.0",
+        "answers": {
+            "family": {"type": "noul", "noul": 0.30},
+            "children": {"type": "noul", "noul": 0.20},
+            "kid_welcome": {"type": "noul", "noul": 0.81},
+            "adult": {"type": "noul", "noul": 0.05},
+        },
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+    result = _classifier(lambda r: httpx2.Response(200, json=body)).classify([make_input("walk")], taxonomy)["walk"]
+    assert result.family_score == 0.81
+    assert result.decision == "accept"
+    assert result.scores["kid_welcome"] == 0.81 and result.scores["family"] == 0.30
+
+
+def test_drop_off_kids_program_accepted_via_children_question(taxonomy):
+    body = {
+        "model": "jev-1.13.0",
+        "answers": {
+            "family": {"type": "noul", "noul": 0.25},
+            "children": {"type": "noul", "noul": 0.92},
+            "kid_welcome": {"type": "noul", "noul": 0.10},
+            "adult": {"type": "noul", "noul": 0.01},
+        },
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+    assert _classifier(lambda r: httpx2.Response(200, json=body)).classify([make_input("camp")], taxonomy)["camp"].decision == "accept"
+
+
+def test_adult_override_beats_kid_welcome(taxonomy):
+    body = {
+        "model": "jev-1.13.0",
+        "answers": {"kid_welcome": {"type": "noul", "noul": 0.9}, "adult": {"type": "noul", "noul": 0.95}},
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+    assert _classifier(lambda r: httpx2.Response(200, json=body)).classify([make_input("pub")], taxonomy)["pub"].decision == "reject"
