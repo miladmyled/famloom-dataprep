@@ -1,8 +1,31 @@
 from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock
 from src.config.database import get_db_pool
-from src.db.events import upsert_city_event
+from src.db.events import CITY_EVENTS_COLUMNS, upsert_city_event
 from src.models.event import CityEvent
+
+
+def _mock_conn(fetchone):
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+    if isinstance(fetchone, list):
+        mock_cursor.fetchone.side_effect = fetchone
+    else:
+        mock_cursor.fetchone.return_value = fetchone
+    return mock_conn, mock_cursor
+
+
+def _event(**kw) -> CityEvent:
+    defaults = dict(
+        event_id="eb_sql_test_101",
+        city="Vancouver, BC",
+        title="Family Puppet Show",
+        url="https://eventbrite.ca/e/puppet-101",
+        start_date=datetime.now(timezone.utc) + timedelta(days=3),
+    )
+    defaults.update(kw)
+    return CityEvent(**defaults)
 
 
 def test_db_pool_configuration():
@@ -12,130 +35,81 @@ def test_db_pool_configuration():
     pool.close()
 
 
-def test_upsert_city_event_sql_generation():
-    mock_conn = MagicMock()
-    mock_cursor = MagicMock()
-    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
-    mock_cursor.fetchone.return_value = {"id": 101}
-
-    future_date = datetime.now(timezone.utc) + timedelta(days=3)
-    event = CityEvent(
-        event_id="eb_sql_test_101",
-        city="Vancouver, BC",
-        title="Family Puppet Show",
-        url="https://eventbrite.ca/e/puppet-101",
-        start_date=future_date,
-        status="live",
-        is_canceled=False,
+def test_city_events_columns_are_the_fixed_app_schema():
+    assert CITY_EVENTS_COLUMNS == (
+        "id", "city", "title", "source", "url", "date", "pictureurl", "created_at", "updated_at",
     )
+
+
+def test_upsert_writes_only_existing_columns_and_conflicts_on_url():
+    mock_conn, mock_cursor = _mock_conn({"id": 101})
+    event = _event(description="not persisted", location_summary="not persisted", status="live")
 
     upsert_city_event(mock_conn, event)
 
-    assert mock_cursor.execute.called
-    call_args = mock_cursor.execute.call_args_list[0]
-    sql = call_args[0][0]
-    params = call_args[0][1]
-
-    assert "INSERT INTO city_events" in sql
-    assert "ON CONFLICT" in sql
-    assert "DO UPDATE SET" in sql
-    assert "WHERE" in sql
-    assert "IS DISTINCT FROM" in sql
-    assert "RETURNING id" in sql
-    assert params["city"] == "Vancouver, BC"
-    assert params["title"] == "Family Puppet Show"
-    assert params["status"] == "live"
-    assert params["is_canceled"] is False
+    sql, params = mock_cursor.execute.call_args_list[0][0]
+    assert "INSERT INTO city_events (id, city, title, source, url, date, pictureurl, created_at, updated_at)" in sql
+    assert "ON CONFLICT (url) DO UPDATE SET" in sql
+    assert "IS DISTINCT FROM" in sql and "RETURNING id" in sql
+    for absent in ("event_id", "start_date", "end_date", "description", "location_summary", "status", "is_canceled"):
+        assert absent not in sql
+    assert set(params) == {"city", "title", "source", "url", "date", "pictureurl"}
+    assert params["date"] == event.start_date
+    assert params["url"] == "https://eventbrite.ca/e/puppet-101"
 
 
-def test_upsert_city_event_duplicate_data_skips_update_and_uses_fallback_lookup():
-    """
-    Verifies that when duplicate data matches existing row,
-    PostgreSQL WHERE clause skips update (returning no id from INSERT),
-    and the fallback SELECT lookup retrieves the existing id without crashing or re-writing.
-    """
-    mock_conn = MagicMock()
-    mock_cursor = MagicMock()
-    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
-    # First fetchone (INSERT ... RETURNING id) returns None because update was skipped
-    # Second fetchone (SELECT id FROM city_events ...) returns existing row id 205
-    mock_cursor.fetchone.side_effect = [None, {"id": 205}]
+def test_upsert_never_runs_ddl():
+    mock_conn, mock_cursor = _mock_conn({"id": 1})
+    upsert_city_event(mock_conn, _event(tag_ids=[1], replace_tags=True))
+    executed = " ".join(str(c[0][0]) for c in mock_cursor.execute.call_args_list).upper()
+    assert "CREATE TABLE" not in executed and "ALTER TABLE" not in executed
 
-    future_date = datetime.now(timezone.utc) + timedelta(days=2)
-    event = CityEvent(
-        event_id="eb_sql_dup_205",
-        city="Vancouver, BC",
-        title="Duplicate Event Title",
-        url="https://eventbrite.ca/e/dup-205",
-        start_date=future_date,
-        status="live",
-        is_canceled=False,
-    )
 
-    result_id = upsert_city_event(mock_conn, event)
+def test_upsert_unchanged_row_uses_url_lookup():
+    mock_conn, mock_cursor = _mock_conn([None, {"id": 205}])
+
+    result_id = upsert_city_event(mock_conn, _event(url="https://eventbrite.ca/e/dup-205"))
+
     assert result_id == 205
-    assert mock_cursor.execute.call_count == 2
-
-    # Verify fallback lookup query
-    fallback_call = mock_cursor.execute.call_args_list[1]
-    fallback_sql = fallback_call[0][0]
-    fallback_params = fallback_call[0][1]
-    assert "SELECT id FROM city_events WHERE" in fallback_sql
-    assert fallback_params["conflict_val"] == "eb_sql_dup_205"
+    lookup_sql, lookup_params = mock_cursor.execute.call_args_list[1][0]
+    assert "SELECT id FROM city_events WHERE url = %(url)s" in lookup_sql
+    assert lookup_params == {"url": "https://eventbrite.ca/e/dup-205"}
 
 
+def test_legacy_message_tags_are_add_only():
+    mock_conn, mock_cursor = _mock_conn({"id": 42})
 
-def test_upsert_city_event_with_tag_ids_batch_insert():
-    mock_conn = MagicMock()
-    mock_cursor = MagicMock()
-    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
-    mock_cursor.fetchone.return_value = {"id": 42}
+    upsert_city_event(mock_conn, _event(tag_ids=[20, 10]))
 
-    future_date = datetime.now(timezone.utc) + timedelta(days=3)
-    event = CityEvent(
-        event_id="eb_sql_test_102",
-        city="Vancouver, BC",
-        title="Youth Soccer Camp",
-        url="https://eventbrite.ca/e/soccer-102",
-        start_date=future_date,
-        tag_ids=[10, 20],
-    )
-
-    result_id = upsert_city_event(mock_conn, event)
-    assert result_id == 42
-
-    # Verify batch insert for event_interest_tags
-    assert mock_cursor.executemany.called
-    tag_call_args = mock_cursor.executemany.call_args
-    tag_sql = tag_call_args[0][0]
-    tag_records = tag_call_args[0][1]
-
+    assert all("DELETE" not in str(c[0][0]) for c in mock_cursor.execute.call_args_list)
+    tag_sql, tag_records = mock_cursor.executemany.call_args[0]
     assert "INSERT INTO event_interest_tags" in tag_sql
     assert "ON CONFLICT (event_id, question_value_id) DO NOTHING" in tag_sql
     assert tag_records == [(42, 10), (42, 20)]
+
+
+def test_upsert_with_pictureurl():
+    mock_conn, mock_cursor = _mock_conn({"id": 105})
+    upsert_city_event(mock_conn, _event(pictureurl="https://img.evbuc.com/images/999/original.jpg"))
+    sql, params = mock_cursor.execute.call_args_list[0][0]
+    assert "pictureurl = COALESCE(EXCLUDED.pictureurl, city_events.pictureurl)" in sql
+    assert params["pictureurl"] == "https://img.evbuc.com/images/999/original.jpg"
 
 
 def test_get_active_interests_success():
     from src.db.events import get_active_interests
 
     mock_pool = MagicMock()
-    mock_conn = MagicMock()
     mock_cursor = MagicMock()
-
-    mock_pool.connection.return_value.__enter__.return_value = mock_conn
-    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+    mock_pool.connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value = mock_cursor
     mock_cursor.fetchall.return_value = [
-        {"question_value_id": 1, "label": "Sports"},
-        {"question_value_id": 2, "label": "art & crafts"},
-        {"question_value_id": 3, "label": "music"},
+        {"value_id": 1, "code": "interests", "value_code": "sports", "label": "Sports"},
+        {"value_id": 2, "code": "interests", "value_code": "art", "label": "art & crafts"},
+        {"value_id": 3, "code": "interests", "value_code": "music", "label": "music"},
     ]
 
-    result = get_active_interests(mock_pool)
-    assert result == {
-        "sports": 1,
-        "art & crafts": 2,
-        "music": 3,
-    }
+    assert get_active_interests(mock_pool) == {"sports": 1, "art & crafts": 2, "music": 3}
+    assert mock_cursor.execute.call_args[0][1] == {"codes": ["interests"]}
 
 
 def test_get_active_interests_graceful_error_handling():
@@ -143,36 +117,4 @@ def test_get_active_interests_graceful_error_handling():
 
     mock_pool = MagicMock()
     mock_pool.connection.side_effect = Exception("Database Connection Refused")
-
-    # Should catch gracefully and return {} without crashing
-    result = get_active_interests(mock_pool)
-    assert result == {}
-
-
-def test_upsert_city_event_with_pictureurl():
-    mock_conn = MagicMock()
-    mock_cursor = MagicMock()
-    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
-    mock_cursor.fetchone.return_value = {"id": 105}
-
-    future_date = datetime.now(timezone.utc) + timedelta(days=3)
-    event = CityEvent(
-        event_id="eb_sql_test_pic",
-        city="Vancouver, BC",
-        title="Family Puppet Show",
-        url="https://eventbrite.ca/e/puppet-pic",
-        start_date=future_date,
-        pictureurl="https://img.evbuc.com/images/999/original.jpg",
-    )
-
-    upsert_city_event(mock_conn, event)
-
-    assert mock_cursor.execute.called
-    call_args = mock_cursor.execute.call_args_list[0]
-    sql = call_args[0][0]
-    params = call_args[0][1]
-
-    assert "pictureurl" in sql
-    assert params["pictureurl"] == "https://img.evbuc.com/images/999/original.jpg"
-
-
+    assert get_active_interests(mock_pool) == {}

@@ -36,6 +36,13 @@ class CityEvent(BaseModel):
     is_canceled: bool = Field(default=False, description="Tombstone flag for canceled events")
     pictureurl: Optional[str] = Field(default=None, description="Direct URL to event photo or banner image")
     tag_ids: List[int] = Field(default_factory=list, description="Matched interest tag IDs from question_values")
+    replace_tags: bool = Field(
+        default=False,
+        description=(
+            "True when tag_ids is the complete set of managed (interests/languages) tags, so the "
+            "consumer replaces stale ones. Legacy messages omit it and keep add-only behaviour."
+        ),
+    )
 
     @property
     def date(self) -> datetime:

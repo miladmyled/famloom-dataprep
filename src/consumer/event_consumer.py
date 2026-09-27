@@ -9,7 +9,7 @@ from confluent_kafka import Consumer, KafkaError, KafkaException, TopicPartition
 from pydantic import ValidationError
 
 from src.models.event import CityEvent
-from src.db.events import init_db_schema, upsert_city_event
+from src.db.events import upsert_city_event
 from src.config.database import get_db_pool
 
 logger = logging.getLogger(__name__)
@@ -31,15 +31,12 @@ class EventKafkaConsumer:
         config: Optional[Dict[str, Any]] = None,
         topic: Optional[str] = None,
     ) -> None:
-        self.topic = topic or os.getenv("KAFKA_TOPIC_NAME", "raw-events-ingestion")
+        # Same variable as the producer (KAFKA_TOPIC); KAFKA_TOPIC_NAME kept as a legacy fallback
+        self.topic = topic or os.getenv("KAFKA_TOPIC") or os.getenv("KAFKA_TOPIC_NAME") or "raw-events-ingestion"
         self.running = False
 
-        # Initialize PostgreSQL connection pool and verify table schema contracts
+        # Initialize PostgreSQL connection pool (city_events schema is owned by the app migrations)
         self.db_pool = get_db_pool()
-        try:
-            init_db_schema(self.db_pool)
-        except Exception as schema_err:
-            logger.warning(f"⚠️ [CONSUMER] Schema verification warning: {schema_err}")
 
         # Build Confluent Kafka Consumer configuration
         default_config = {
@@ -132,6 +129,15 @@ class EventKafkaConsumer:
                 pass
             return True
 
+        # Canceled events are never written: removal is done by the nightly janitor
+        if event.is_canceled:
+            logger.info(f"[CONSUMER] Skipping canceled event '{event.event_id}' at offset {offset} (janitor removes it).")
+            try:
+                self.consumer.commit(message=msg, asynchronous=True)
+            except Exception:
+                pass
+            return True
+
         # Database Transaction & Idempotent Upsert
         try:
             with self.db_pool.connection() as conn:
@@ -170,6 +176,7 @@ class EventKafkaConsumer:
 
         valid_events: List[CityEvent] = []
         valid_msgs: List[Any] = []
+        skipped_msgs: List[Any] = []
 
         for msg in messages:
             if msg.error():
@@ -191,6 +198,11 @@ class EventKafkaConsumer:
             try:
                 payload_dict = json.loads(msg_str)
                 event = CityEvent(**payload_dict)
+                if event.is_canceled:
+                    # Never written; the nightly janitor removes canceled events
+                    logger.info(f"[CONSUMER] Skipping canceled event '{event.event_id}' at offset {msg.offset()}.")
+                    skipped_msgs.append(msg)
+                    continue
                 valid_events.append(event)
                 valid_msgs.append(msg)
             except Exception as val_err:
@@ -203,6 +215,11 @@ class EventKafkaConsumer:
                     pass
 
         if not valid_events:
+            if skipped_msgs:
+                try:
+                    self.consumer.commit(message=skipped_msgs[-1], asynchronous=True)
+                except Exception:
+                    pass
             return 0
 
         # Attempt atomic batch transaction across WAN to Azure
@@ -212,8 +229,8 @@ class EventKafkaConsumer:
                     for event in valid_events:
                         upsert_city_event(conn, event)
 
-            # Commit highest offset in batch
-            highest_msg = valid_msgs[-1]
+            # Commit highest offset in batch (including skipped canceled messages)
+            highest_msg = max(valid_msgs + skipped_msgs, key=lambda m: m.offset())
             try:
                 self.consumer.commit(message=highest_msg, asynchronous=True)
             except Exception:
