@@ -21,3 +21,9 @@ def test_page_metadata_helpers():
     assert "noindex" in robots_meta(fixture("noindex.html"))
     assert has_password_form(fixture("login_wall.html"))
     assert find_terms_link(fixture("venue_jsonld.html"), "https://h.example/events") == "https://h.example/terms-of-use"
+
+
+def test_page_wrapped_in_a_form_keeps_its_content():
+    html = "<html><body><form id='aspnetForm'><input name='q'><button>Go</button><main>" + "Oct 3 Family skate at the rink. " * 30 + "</main></form></body></html>"
+    text = main_text(html)
+    assert "Family skate" in text and "Go" not in text.split()

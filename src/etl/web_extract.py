@@ -98,7 +98,8 @@ def normalize_jsonld_event(node: Dict[str, Any], page_url: str) -> Optional[Dict
 def main_text(html: str, max_chars: int = 12000) -> str:
     """Visible text of the page without scripts, styles, navigation, header and footer."""
     soup = soup_of(html)
-    for tag in soup(["script", "style", "noscript", "svg", "nav", "header", "footer", "form", "iframe"]):
+    # form *controls* only: ASP.NET sites wrap the whole page in one <form>
+    for tag in soup(["script", "style", "noscript", "svg", "nav", "header", "footer", "iframe", "input", "select", "button", "textarea", "option"]):
         tag.decompose()
     body = soup.body or soup
     root = soup.find("main") or soup.find(attrs={"role": "main"}) or body

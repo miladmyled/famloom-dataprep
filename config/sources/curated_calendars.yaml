@@ -146,12 +146,11 @@
   kind: html
   render: js
   source_label: Science World
-  enabled: true
-  approved: 2026-09-27  # GATE 2a
+  enabled: false  # approved at GATE 2a, disabled 2026-09-27 for a technical reason (see terms_notes)
   robots_checked: 2026-09-27
   robots_notes: "User-agent * Disallow: (nothing)"
   terms_checked: 2026-09-27
-  terms_notes: "Legal page covers privacy only; no restriction on automated access or reuse. JS-rendered list."
+  terms_notes: "Legal page covers privacy only; no restriction on automated access or reuse. JS-rendered list. 2026-09-27 dev run: the listing only renders after accepting the cookie banner, which the crawler never does, so the page yields no events. Revisit, or ask Science World for a feed."
 
 - city: Vancouver, BC, Canada
   name: H.R. MacMillan Space Centre events
