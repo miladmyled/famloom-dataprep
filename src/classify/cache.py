@@ -14,17 +14,24 @@ logger = logging.getLogger(__name__)
 TABLE = "city_event_classifications"
 
 
-def content_hash(inp: ClassifyInput, taxonomy_hash: str, prompt_version: str = PROMPT_VERSION) -> str:
+def content_hash(
+    inp: ClassifyInput,
+    taxonomy_hash: str,
+    prompt_version: str = PROMPT_VERSION,
+    primary_language: Optional[str] = None,
+) -> str:
     """
     Changes whenever anything that could change the classification changes: text, place, date,
-    city (the excluded primary language depends on it), prompt wording or taxonomy.
+    the city's primary language (it decides which languages are asked), prompt wording or
+    taxonomy. The city name itself is not part of the key, so the same event listed under
+    several cities with the same primary language is classified once.
     """
     parts = [
         normalize_for_hash(inp.title),
         normalize_for_hash(inp.description),
         normalize_for_hash(inp.location_summary),
         inp.start_date.isoformat() if inp.start_date else "",
-        normalize_for_hash(inp.city),
+        primary_language or "",
         prompt_version,
         taxonomy_hash,
     ]

@@ -109,7 +109,7 @@ def test_english_never_tagged_in_vancouver_french_tagged(taxonomy):
 def test_content_hash_saved_on_results(taxonomy):
     event = make_event("e1")
     _, cache = _run([event], FakeProvider("jev"), taxonomy=taxonomy)
-    assert cache.rows["e1"].content_hash == content_hash(to_input(event), taxonomy.hash)
+    assert cache.rows["e1"].content_hash == content_hash(to_input(event), taxonomy.hash, primary_language="en")
 
 
 def test_cache_hit_applies_current_thresholds_and_saves_change(taxonomy):

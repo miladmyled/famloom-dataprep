@@ -99,7 +99,8 @@ def classify_events(
 
     tax_hash = taxonomy.hash
     inputs = {e.event_id: to_input(e) for e in events}
-    hashes = {eid: content_hash(inp, tax_hash) for eid, inp in inputs.items()}
+    primary = taxonomy.primary_languages.primary_language_code
+    hashes = {eid: content_hash(inp, tax_hash, primary_language=primary(inp.city)) for eid, inp in inputs.items()}
     by_id = {e.event_id: e for e in events}
     cached = cache.get_cached(inputs.keys())
 

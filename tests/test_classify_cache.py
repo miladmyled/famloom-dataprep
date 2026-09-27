@@ -18,7 +18,7 @@ def test_hash_changes_with_title_date_city_prompt_and_taxonomy():
     base = make_input()
     h = content_hash(base, "t1")
     assert content_hash(replace(base, title="Other"), "t1") != h
-    assert content_hash(replace(base, city="Montreal, QC, Canada"), "t1") != h
+    assert content_hash(base, "t1", primary_language="fr") != content_hash(base, "t1", primary_language="en")
     assert content_hash(replace(base, start_date=None), "t1") != h
     assert content_hash(base, "t2") != h
     assert content_hash(base, "t1", prompt_version="other") != h
@@ -70,3 +70,9 @@ def test_row_roundtrip():
     }]
     got = ClassificationCache(pool).get_cached(["e1"])["e1"]
     assert got.tag_ids == [42, 503] and got.scores == {"family": 0.9}
+
+
+def test_same_event_in_two_cities_with_same_primary_language_shares_the_key():
+    a = make_input(city="Vancouver, BC, Canada")
+    b = make_input(city="Coquitlam, BC, Canada")
+    assert content_hash(a, "t", primary_language="en") == content_hash(b, "t", primary_language="en")
