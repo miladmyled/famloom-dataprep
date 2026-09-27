@@ -32,3 +32,11 @@ def test_janitor_schedule_unchanged_and_classified_removal_off_until_gate3():
 def test_dockerfile_ships_config_directory():
     dockerfile = (MANIFESTS.parent / "Dockerfile").read_text(encoding="utf-8")
     assert "COPY config/ ./config/" in dockerfile
+
+
+def test_phase2_flags_in_scraper_manifest():
+    env = _env(_load("scraper-cronjob.yaml"))
+    assert env["CURATED_CALENDARS_ENABLED"] == "true"
+    assert env["WEB_SEARCH_ENABLED"] == "true"
+    assert env["FACEBOOK_SNIPPETS_ENABLED"] == "false"
+    assert env["CRAWLER_CONTACT_EMAIL"] == "miladmyled@gmail.com"

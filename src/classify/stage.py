@@ -108,8 +108,12 @@ def classify_events(
     status_updates = []
     misses: List[ClassifyInput] = []
 
+    def key(eid: str) -> str:
+        event = by_id[eid]
+        return event.origin or event.source
+
     for eid, inp in inputs.items():
-        m = out.metrics[inp.source]
+        m = out.metrics[key(eid)]
         prior = cached.get(eid)
         if inp.is_canceled:
             m["canceled"] += 1
@@ -134,11 +138,11 @@ def classify_events(
     for eid, result in outcome.results.items():
         result.content_hash = hashes[eid]
         out.results[eid] = result
-        out.metrics[inputs[eid].source]["classified"] += 1
+        out.metrics[key(eid)]["classified"] += 1
         if result.provider != "keyword":  # keyword results are not cached: AI classifies later
             to_save.append(result)
     for eid in outcome.failed:
-        out.metrics[inputs[eid].source]["classifier_errors"] += 1
+        out.metrics[key(eid)]["classifier_errors"] += 1
         prior = cached.get(eid)
         if prior is not None and prior.provider != "status":
             rederive(prior, taxonomy, inputs[eid].city, thresholds)
@@ -149,7 +153,7 @@ def classify_events(
 
     for eid, result in out.results.items():
         event = by_id[eid]
-        m = out.metrics[event.source]
+        m = out.metrics[key(eid)]
         if chain.keyword_only and result.provider == "keyword":
             m["review"] += 1
             out.publish.append(event.model_copy(update={"tag_ids": result.interest_value_ids, "replace_tags": False}))

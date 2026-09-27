@@ -24,7 +24,10 @@ from src.etl.eventbrite import EventbriteScraper
 from src.etl.meetup_public import MeetupExtractor
 from src.etl.transformer import clean_and_validate_event
 from src.etl.kafka_producer import EventKafkaProducer
-from src.etl.dedupe import dedupe_events
+from src.etl.dedupe import dedupe_events, load_existing_events
+from src.etl.curated_calendars import CuratedCalendarSource, curated_enabled
+from src.etl.web_search_discovery import SiteStore, WebSearchDiscoverySource, web_search_enabled
+from src.etl.facebook_snippets import FacebookSnippetSource, facebook_snippets_enabled
 from src.etl.base import BaseEventScraper
 from src.classify.cache import ClassificationCache
 from src.classify.factory import get_classifier
@@ -46,12 +49,81 @@ class ScrapeResult:
     ok: bool = True
 
 
-def build_scraper_tasks(city: str) -> List[Tuple[str, str, BaseEventScraper]]:
-    """(task name, source label, scraper) for every enabled source of a city."""
-    return [
-        (f"EventbriteScraper[{city}]", "Eventbrite", EventbriteScraper(city=city)),
-        (f"MeetupExtractor[{city}]", "Meetup", MeetupExtractor(city=city)),
+class SharedWebClients:
+    """One polite HTTP client, Brave budget, Jev screener and Gemini extractor per run (lazy)."""
+
+    def __init__(self, pool=None):
+        self.pool = pool
+        self._http = self._search = self._screener = self._extractor = None
+        self.store = SiteStore(pool)
+
+    @property
+    def http(self):
+        if self._http is None:
+            from src.net.http import PoliteHttpClient
+
+            self._http = PoliteHttpClient()
+        return self._http
+
+    @property
+    def search(self):
+        if self._search is None:
+            from src.net.brave import BraveSearchClient
+
+            self._search = BraveSearchClient()
+        return self._search
+
+    @property
+    def screener(self):
+        if self._screener is None:
+            from src.classify.screen import get_screener
+
+            self._screener = get_screener() or False
+        return self._screener or None
+
+    @property
+    def extractor(self):
+        if self._extractor is None:
+            try:
+                from src.classify.gemini import GeminiExtractor
+
+                self._extractor = GeminiExtractor()
+            except Exception as err:
+                logger.warning(f"⚠️ Gemini extractor unavailable: {err}")
+                self._extractor = False
+        return self._extractor or None
+
+
+def _brave_configured() -> bool:
+    return bool(os.getenv("BRAVE_SEARCH_API_KEY"))
+
+
+def build_scraper_tasks(city: str, shared: Optional[SharedWebClients] = None) -> List[Tuple[str, str, BaseEventScraper]]:
+    """(task name, source kind, scraper) for every enabled source of a city."""
+    tasks: List[Tuple[str, str, BaseEventScraper]] = [
+        (f"EventbriteScraper[{city}]", "eventbrite", EventbriteScraper(city=city)),
+        (f"MeetupExtractor[{city}]", "meetup", MeetupExtractor(city=city)),
     ]
+    if shared is None:
+        return tasks
+    if curated_enabled():
+        curated = CuratedCalendarSource(city=city, http=shared.http, screener=shared.screener, extractor=shared.extractor)
+        if curated.calendars:
+            tasks.append((f"CuratedCalendars[{city}]", "curated", curated))
+    if web_search_enabled():
+        if _brave_configured():
+            tasks.append((f"WebDiscovery[{city}]", "web", WebSearchDiscoverySource(
+                city=city, search=shared.search, http=shared.http, screener=shared.screener,
+                extractor=shared.extractor, store=shared.store)))
+        else:
+            logger.warning(f"⚠️ WEB_SEARCH_ENABLED but BRAVE_SEARCH_API_KEY missing; web discovery skipped for '{city}'.")
+    if facebook_snippets_enabled():
+        if _brave_configured():
+            tasks.append((f"FacebookSnippets[{city}]", "facebook_snippet", FacebookSnippetSource(
+                city=city, search=shared.search, screener=shared.screener, extractor=shared.extractor)))
+        else:
+            logger.warning(f"⚠️ FACEBOOK_SNIPPETS_ENABLED but BRAVE_SEARCH_API_KEY missing; skipped for '{city}'.")
+    return tasks
 
 
 def _scrape(name: str, source: str, scraper: BaseEventScraper) -> ScrapeResult:
@@ -64,6 +136,8 @@ def _scrape(name: str, source: str, scraper: BaseEventScraper) -> ScrapeResult:
         for raw_dict in scraper.normalize_data(raw_events):
             valid_event = clean_and_validate_event(raw_dict)
             if valid_event is not None:
+                if not valid_event.origin:
+                    valid_event = valid_event.model_copy(update={"origin": source})
                 result.events.append(valid_event)
         logger.info(f"✅ [WORKER FINISH] {name}: {result.raw} raw, {len(result.events)} valid.")
     except Exception as exc:
@@ -131,8 +205,9 @@ def run_etl_pipeline() -> int:
     try:
         # 3. Scrape all sources concurrently
         logger.info("[STEP 3/5] Scraping and validating events concurrently...")
+        shared = SharedWebClients(cache_pool)
         for city in active_cities:
-            tasks.extend(build_scraper_tasks(city))
+            tasks.extend(build_scraper_tasks(city, shared))
         by_city: Dict[str, List[ScrapeResult]] = defaultdict(list)
         max_workers = min(int(os.getenv("MAX_CONCURRENT_WORKERS", "3")), max(len(tasks), 1))
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -148,7 +223,8 @@ def run_etl_pipeline() -> int:
         for city in active_cities:
             results = by_city.get(city, [])
             try:
-                events, duplicates = dedupe_events([e for r in results for e in r.events])
+                existing = load_existing_events(cache_pool, city) if cache_pool is not None else []
+                events, duplicates = dedupe_events([e for r in results for e in r.events], existing)
                 for source, count in duplicates.items():
                     metrics[source]["duplicates"] += count
                 stage = classify_events(events, chain, cache, taxonomy)
@@ -157,7 +233,7 @@ def run_etl_pipeline() -> int:
                 queued = 0
                 for event in stage.publish:
                     if producer.publish_event(event):
-                        metrics[event.source]["queued"] += 1
+                        metrics[event.origin or event.source]["queued"] += 1
                         queued += 1
                 if queued:
                     producer.flush(timeout=5.0, max_attempts=1)
