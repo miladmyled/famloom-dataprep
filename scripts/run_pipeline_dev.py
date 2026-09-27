@@ -1,0 +1,155 @@
+"""
+Dev end-to-end run of the scraper flow for chosen cities and sources.
+
+    python scripts/run_pipeline_dev.py --city "Vancouver, BC, Canada" --sources eventbrite,meetup --no-publish
+    python scripts/run_pipeline_dev.py --all-cities --publish          # dev/local Kafka only
+
+--no-publish (default): scrape, validate, de-duplicate and classify, then print a summary and
+  sample decisions and write reports/pipeline_<ts>.csv. Classifications ARE saved to the dev
+  cache (city_event_classifications) unless --no-cache-write is given; nothing is sent to Kafka.
+--publish: additionally publishes accepted events to KAFKA_BOOTSTRAP_SERVERS, which must be an
+  approved dev/local broker (see scripts/_common.py). Refuses the production database.
+Replaces scripts/test_pipeline.py for dev runs (that file still works as a quick smoke test).
+"""
+import argparse
+import csv
+import random
+import sys
+from collections import Counter, defaultdict
+from datetime import datetime, timezone
+
+import _common
+
+from src.classify.cache import ClassificationCache
+from src.classify.factory import get_classifier
+from src.classify.stage import classify_events
+from src.classify.taxonomy import get_active_taxonomy
+from src.config.database import get_db_pool
+from src.etl.dedupe import dedupe_events
+from src.etl.transformer import clean_and_validate_event
+
+SOURCES = {
+    "eventbrite": ("Eventbrite", lambda city: __import__("src.etl.eventbrite", fromlist=["x"]).EventbriteScraper(city=city)),
+    "meetup": ("Meetup", lambda city: __import__("src.etl.meetup_public", fromlist=["x"]).MeetupExtractor(city=city)),
+}
+
+
+class _NoWriteCache(ClassificationCache):
+    def save(self, results):
+        return 0
+
+    def update_status(self, items):
+        return None
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--city", action="append", default=[], help="city exactly as in family_profiles.location (repeatable)")
+    parser.add_argument("--all-cities", action="store_true", help="all distinct family_profiles.location values")
+    parser.add_argument("--sources", default="eventbrite,meetup", help=f"comma list of: {', '.join(SOURCES)}")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--no-publish", action="store_true", default=True)
+    mode.add_argument("--publish", action="store_true")
+    parser.add_argument("--no-cache-write", action="store_true", help="do not save classifications to the dev cache")
+    parser.add_argument("--samples", type=int, default=20, help="sample decisions to print")
+    args = parser.parse_args()
+
+    _common.require_dev_db()
+    if args.publish:
+        _common.require_dev_kafka()
+
+    pool = get_db_pool()
+    try:
+        if args.all_cities:
+            from src.etl.extractor import get_active_cities
+
+            cities = get_active_cities()
+        else:
+            cities = args.city
+        if not cities:
+            parser.error("give --city or --all-cities")
+        sources = [s.strip().lower() for s in args.sources.split(",") if s.strip()]
+        unknown = [s for s in sources if s not in SOURCES]
+        if unknown:
+            parser.error(f"unknown sources: {unknown}")
+
+        taxonomy = get_active_taxonomy(pool)
+        chain = get_classifier()
+        cache = (_NoWriteCache if args.no_cache_write else ClassificationCache)(pool)
+        labels = {v.value_id: v.label for v in taxonomy.values}
+
+        producer = None
+        if args.publish:
+            from src.etl.kafka_producer import EventKafkaProducer
+
+            producer = EventKafkaProducer()
+
+        rows, metrics = [], defaultdict(Counter)
+        for city in cities:
+            events = []
+            for key in sources:
+                label, factory = SOURCES[key]
+                scraper = factory(city)
+                raw = scraper.fetch_raw_events()
+                valid = [e for e in (clean_and_validate_event(r) for r in scraper.normalize_data(raw)) if e is not None]
+                metrics[label]["raw"] += len(raw)
+                metrics[label]["valid"] += len(valid)
+                events.extend(valid)
+            events, dups = dedupe_events(events)
+            for src, n in dups.items():
+                metrics[src]["duplicates"] += n
+            stage = classify_events(events, chain, cache, taxonomy)
+            for src, counter in stage.metrics.items():
+                metrics[src].update(counter)
+            published = {e.event_id for e in stage.publish}
+            if producer:
+                for event in stage.publish:
+                    if producer.publish_event(event):
+                        metrics[event.source]["queued"] += 1
+            for event in events:
+                r = stage.results.get(event.event_id)
+                rows.append({
+                    "city": city,
+                    "source": event.source,
+                    "event_id": event.event_id,
+                    "title": event.title,
+                    "date": event.start_date.isoformat(),
+                    "url": str(event.url),
+                    "canceled": event.is_canceled,
+                    "provider": r.provider if r else "",
+                    "family_score": f"{r.family_score:.2f}" if r and r.family_score is not None else "",
+                    "adult_score": f"{r.adult_score:.2f}" if r and r.adult_score is not None else "",
+                    "decision": r.decision if r else ("canceled" if event.is_canceled else "unclassified"),
+                    "published": event.event_id in published,
+                    "interests": "; ".join(labels.get(i, str(i)) for i in (r.interest_value_ids if r else [])),
+                    "languages": "; ".join(labels.get(i, str(i)) for i in (r.language_value_ids if r else [])),
+                })
+        if producer:
+            producer.flush(timeout=30.0, max_attempts=3)
+    finally:
+        pool.close()
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    path = _common.reports_dir() / f"pipeline_{stamp}.csv"
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()) if rows else ["city"])
+        writer.writeheader()
+        writer.writerows(rows)
+
+    keys = ("raw", "valid", "duplicates", "cache_hits", "classified", "accepted", "review", "rejected", "canceled", "classifier_errors", "queued")
+    print(f"\nClassifier chain: {' -> '.join(chain.names)}    mode: {'PUBLISH' if args.publish else 'no-publish'}")
+    print(f"{'source':<12}" + "".join(f"{k[:10]:>11}" for k in keys))
+    for src in sorted(metrics):
+        print(f"{src:<12}" + "".join(f"{metrics[src].get(k, 0):>11}" for k in keys))
+
+    sample = random.Random(7).sample(rows, min(args.samples, len(rows)))
+    print(f"\n{len(sample)} sample decisions:")
+    for r in sample:
+        print(f"  [{r['decision']:<8} f={r['family_score'] or '-':>4} a={r['adult_score'] or '-':>4}] "
+              f"{r['title'][:70]:<70} | {r['interests'] or '-'} | {r['languages'] or '-'}")
+    print(f"\nReport: {path}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
