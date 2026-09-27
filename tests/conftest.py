@@ -1,11 +1,30 @@
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Iterable, List
 
+import socket
+
 import pytest
 
 from src.classify.models import ClassificationResult, ClassifyInput, TaxonomyValue
 from src.classify.taxonomy import PrimaryLanguageMap, Taxonomy
 from src.models.event import CityEvent
+
+@pytest.fixture(autouse=True)
+def _no_network_and_new_sources_off(monkeypatch):
+    """Tests never touch the network (spec rule 9); new web sources are off unless a test enables them."""
+    for flag in ("CURATED_CALENDARS_ENABLED", "WEB_SEARCH_ENABLED", "FACEBOOK_SNIPPETS_ENABLED"):
+        monkeypatch.setenv(flag, "false")
+    real_connect = socket.socket.connect
+
+    def guarded_connect(self, address):
+        host = address[0] if isinstance(address, tuple) else address
+        if host in ("127.0.0.1", "::1", "localhost"):
+            return real_connect(self, address)
+        raise RuntimeError(f"Network access in tests is not allowed: {address}")
+
+    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: (_ for _ in ()).throw(RuntimeError(f"DNS in tests is not allowed: {a[0]}")))
+
 
 INTERESTS = [
     TaxonomyValue(45, "interests", "hiking", "Hiking", "hikes, nature walks"),
