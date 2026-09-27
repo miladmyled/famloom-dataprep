@@ -1,0 +1,13 @@
+{
+  "model": "jev-1.13.0",
+  "answers": {
+    "family": {"type": "noul", "noul": 0.93},
+    "adult": {"type": "noul", "noul": 0.02},
+    "tag_45": {"type": "noul", "noul": 0.08},
+    "tag_42": {"type": "noul", "noul": 0.88},
+    "tag_71": {"type": "noul", "noul": 0.01},
+    "lang_502": {"type": "noul", "noul": 0.04},
+    "lang_503": {"type": "noul", "noul": 0.91}
+  },
+  "usage": {"input_tokens": 1450, "output_tokens": 140}
+}

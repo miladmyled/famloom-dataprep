@@ -1,0 +1,93 @@
+# Primary language of a place, as a `languages` question value_code (see the app's
+# languages migration: en, fr, de, it, es, ...). An event is never tagged with the primary
+# language of its city (English is not tagged in Vancouver, French is not tagged in Montreal).
+#
+# Lookup on the comma-separated parts of city_events.city, case- and accent-insensitive:
+#   1. cities    - the first part ("North Vancouver, BC, Canada" -> "North Vancouver")
+#   2. regions   - province / state parts ("BC", "QC")
+#   3. countries - country parts ("Canada")
+# If nothing matches, no language is excluded and a warning is logged once per city.
+# Changing this file re-classifies events (it is part of the cache key).
+
+cities:
+  Vancouver: en
+  North Vancouver: en
+  West Vancouver: en
+  Coquitlam: en
+  Burnaby: en
+  Richmond: en
+  Surrey: en
+  Toronto: en
+  Calgary: en
+  Ottawa: en
+  Montreal: fr
+  Quebec City: fr
+  Gatineau: fr
+  Laval: fr
+  Paris: fr
+  Berlin: de
+  Munich: de
+  Vienna: de
+  Rome: it
+  Milan: it
+  Madrid: es
+  Barcelona: es
+  Mexico City: es
+  London: en
+  New York: en
+  Seattle: en
+
+regions:
+  # Canada
+  BC: en
+  British Columbia: en
+  AB: en
+  Alberta: en
+  SK: en
+  Saskatchewan: en
+  MB: en
+  Manitoba: en
+  ON: en
+  Ontario: en
+  QC: fr
+  Quebec: fr
+  NB: en
+  New Brunswick: en
+  NS: en
+  Nova Scotia: en
+  PE: en
+  Prince Edward Island: en
+  NL: en
+  Newfoundland and Labrador: en
+  YT: en
+  NT: en
+  NU: en
+  # United States (states default to the country; listed only where useful)
+  WA: en
+  CA: en
+
+countries:
+  Canada: en
+  United States: en
+  USA: en
+  United Kingdom: en
+  UK: en
+  Ireland: en
+  Australia: en
+  New Zealand: en
+  France: fr
+  Belgium: fr
+  Germany: de
+  Austria: de
+  Switzerland: de
+  Italy: it
+  Spain: es
+  Mexico: es
+  Portugal: pt
+  Brazil: pt
+  Iran: fa
+  Turkey: tr
+  Japan: ja
+  South Korea: ko
+  Vietnam: vi
+  China: zh
