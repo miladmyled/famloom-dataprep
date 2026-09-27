@@ -6,3 +6,6 @@ __pycache__/
 
 # Secrets and credentials
 .env
+# Local virtualenv and generated script reports
+.venv/
+reports/

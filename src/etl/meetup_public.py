@@ -9,6 +9,7 @@ import urllib.request
 from dotenv import load_dotenv
 
 from src.etl.base import BaseExtractor
+from src.models.event import stable_fallback_id
 
 load_dotenv(override=True)
 logger = logging.getLogger(__name__)
@@ -467,8 +468,8 @@ class MeetupExtractor(BaseExtractor):
                         event_id = f"meetup_{match.group(1)}"
 
                 if not event_id:
-                    fallback_hash = abs(hash(str(url or raw.get("title") or raw.get("name", "")))) % 100000000
-                    event_id = f"meetup_{fallback_hash}"
+                    fallback_key = str(url or raw.get("title") or raw.get("name", ""))
+                    event_id = f"meetup_{stable_fallback_id('Meetup', fallback_key)}"
 
                 # 2. Title (max 240 chars per CityEvent schema)
                 title = str(raw.get("title") or raw.get("name") or "Untitled Meetup Event").strip()[:240]

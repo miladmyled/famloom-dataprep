@@ -1,6 +1,15 @@
+import hashlib
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
+
+
+def stable_fallback_id(source: str, url: str) -> str:
+    """
+    Deterministic 16-char id derived from source and URL.
+    Python's built-in hash() is salted per process, so it must never be used for ids.
+    """
+    return hashlib.sha256(f"{source}|{url}".encode("utf-8")).hexdigest()[:16]
 
 
 class CityEvent(BaseModel):
@@ -43,9 +52,8 @@ class CityEvent(BaseModel):
                 data["start_date"] = data["date"]
             # Fallback event_id generation if not explicitly provided
             if "event_id" not in data and "url" in data:
-                url_str = str(data["url"])
-                # Extract trailing id from URL or hash
-                data["event_id"] = f"event_{abs(hash(url_str)) % 100000000}"
+                source = str(data.get("source") or "Eventbrite")
+                data["event_id"] = f"event_{stable_fallback_id(source, str(data['url']))}"
             # Map picture_url or image_url aliases to pictureurl
             if "pictureurl" not in data or data.get("pictureurl") is None:
                 if "picture_url" in data:
