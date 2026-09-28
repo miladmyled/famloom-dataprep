@@ -32,8 +32,8 @@ from src.etl.dedupe import dedupe_events, load_existing_events
 from src.etl.transformer import clean_and_validate_event
 
 # --sources value -> source kind used by main.build_scraper_tasks
-SOURCES = {"eventbrite": "eventbrite", "meetup": "meetup", "curated": "curated", "web": "web", "facebook": "facebook_snippet", "instagram": "instagram"}
-FLAG_FOR = {"curated": "CURATED_CALENDARS_ENABLED", "web": "WEB_SEARCH_ENABLED", "facebook": "FACEBOOK_SNIPPETS_ENABLED", "instagram": "INSTAGRAM_ENABLED"}
+SOURCES = {"eventbrite": "eventbrite", "meetup": "meetup", "curated": "curated", "web": "web", "facebook": "facebook_snippet", "instagram": "instagram", "official": "official"}
+FLAG_FOR = {"curated": "CURATED_CALENDARS_ENABLED", "web": "WEB_SEARCH_ENABLED", "facebook": "FACEBOOK_SNIPPETS_ENABLED", "instagram": "INSTAGRAM_ENABLED", "official": "OFFICIAL_SITES_ENABLED"}
 
 
 class _NoWriteCache(ClassificationCache):

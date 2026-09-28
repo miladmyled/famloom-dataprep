@@ -58,8 +58,15 @@ spec:
             # Phase 2 sources (keys come from dataprep-secrets; a source with a missing key is skipped)
             - name: CURATED_CALENDARS_ENABLED
               value: "true"
-            - name: WEB_SEARCH_ENABLED
+            # Official sites from Wikidata (CC0): the automatic way new cities get calendars
+            - name: OFFICIAL_SITES_ENABLED
               value: "true"
+            # Brave web search stays off until Brave confirms the Search plan covers our use;
+            # when enabled it is memoryless (nothing from search results is stored)
+            - name: WEB_SEARCH_ENABLED
+              value: "false"
+            - name: WEB_SEARCH_REMEMBER_SITES
+              value: "false"
             - name: FACEBOOK_SNIPPETS_ENABLED
               value: "false"   # decided at GATE 2b
             - name: INSTAGRAM_ENABLED

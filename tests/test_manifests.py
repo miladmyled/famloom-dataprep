@@ -37,7 +37,9 @@ def test_dockerfile_ships_config_directory():
 def test_phase2_flags_in_scraper_manifest():
     env = _env(_load("scraper-cronjob.yaml"))
     assert env["CURATED_CALENDARS_ENABLED"] == "true"
-    assert env["WEB_SEARCH_ENABLED"] == "true"
+    assert env["WEB_SEARCH_ENABLED"] == "false"  # until Brave confirms the plan
+    assert env["WEB_SEARCH_REMEMBER_SITES"] == "false"
+    assert env["OFFICIAL_SITES_ENABLED"] == "true"
     assert env["FACEBOOK_SNIPPETS_ENABLED"] == "false"
     assert env["INSTAGRAM_ENABLED"] == "false"
     assert env["CRAWLER_CONTACT_EMAIL"] == "miladmyled@gmail.com"

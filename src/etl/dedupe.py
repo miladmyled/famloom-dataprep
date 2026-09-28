@@ -2,7 +2,8 @@
 Cross-source de-duplication. Two events are the same when they are in the same city, start within
 ±30 minutes and their titles are similar (rapidfuzz token_set_ratio >= 85), or share a url.
 The higher-priority source wins:
-  Eventbrite / Meetup / submissions (1) > curated (2) > Instagram (3) > web discovery (4) > Facebook snippets (5)
+  Eventbrite / Meetup / submissions (1) > curated and official sites (2) > Instagram (3) > web search (4)
+  > Facebook snippets (5)
 Applied within the run and against the events already in city_events for the city.
 """
 import logging
@@ -17,7 +18,7 @@ from src.models.event import CityEvent
 
 logger = logging.getLogger(__name__)
 
-PRIORITY = {"eventbrite": 1, "meetup": 1, "submission": 1, "curated": 2, "instagram": 3, "web": 4, "facebook_snippet": 5}
+PRIORITY = {"eventbrite": 1, "meetup": 1, "submission": 1, "curated": 2, "official": 2, "instagram": 3, "web": 4, "facebook_snippet": 5}
 TITLE_SIMILARITY = 85
 START_TOLERANCE = timedelta(minutes=30)
 

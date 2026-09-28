@@ -104,14 +104,22 @@ class SiteStore:
             logger.warning(f"[WEB] event_source_sites query failed: {err}")
         return [] if fetch else None
 
-    def active_sites(self, city: str) -> List[Dict[str, Any]]:
+    def active_sites(self, city: str, via: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Active remembered pages of the city; `via` limits them to one discovery channel."""
         rows = self._run(
-            "SELECT id, url, domain, source_label, kind FROM event_source_sites WHERE city = %(city)s AND status = 'active' ORDER BY id",
-            {"city": city}, fetch=True,
+            """
+            SELECT id, url, domain, source_label, kind FROM event_source_sites
+            WHERE city = %(city)s AND status = 'active'
+              AND (%(via)s::text IS NULL OR approval_scores->>'via' = %(via)s)
+            ORDER BY id
+            """,
+            {"city": city, "via": via}, fetch=True,
         )
         return [dict(r) for r in rows or []]
 
-    def remember(self, city: str, url: str, label: Optional[str], kind: str, scores: Dict[str, float], terms_url: Optional[str]) -> None:
+    def remember(self, city: str, url: str, label: Optional[str], kind: str, scores: Dict[str, float], terms_url: Optional[str],
+                 via: str = "search") -> None:
+        scores = dict(scores, via=via)
         self._run(
             """
             INSERT INTO event_source_sites (city, url, domain, source_label, kind, approval_scores, terms_url, last_success_at)
@@ -149,17 +157,27 @@ class Rejected(Exception):
         self.reason = reason
 
 
-class WebSearchDiscoverySource(BaseEventScraper):
-    source_name = "Web"
+class DiscoveryBase(BaseEventScraper):
+    """
+    Shared discovery pipeline: remembered pages are read first; each new candidate page goes
+    through skip rules, automatic checks, the terms check and AI approval; approved pages give
+    events (JSON-LD or extraction, then links/pictures) and may be remembered. Subclasses decide
+    where candidates come from (`_candidates`) and whether approved pages are remembered.
+    """
 
-    def __init__(self, city: str, search=None, http=None, screener=None, extractor=None, store: Optional[SiteStore] = None,
-                 queries: Optional[List[str]] = None, blocked: Optional[set] = None, calendars=None, **kwargs):
+    source_name = "Discovery"
+    via = "search"
+    remember_sites = True
+    origin_kind = "web"
+    id_prefix = "web"
+
+    def __init__(self, city: str, http=None, screener=None, extractor=None, store: Optional[SiteStore] = None,
+                 blocked: Optional[set] = None, calendars=None, **kwargs):
         super().__init__(city, **kwargs)
         self.city_name = city.split(",")[0].strip()
         self.tz = city_timezone(city)
-        self._search, self._http, self._screener, self._extractor = search, http, screener, extractor
+        self._http, self._screener, self._extractor = http, screener, extractor
         self.store = store if store is not None else SiteStore(None)
-        self.queries = queries if queries is not None else load_queries("discovery")
         cal = calendars if calendars is not None else load_calendars()
         self.curated_enabled = {registrable_domain(c["url"]) for c in cal if c.get("enabled")}
         self.curated_blocked = {registrable_domain(c["url"]) for c in cal if not c.get("enabled")}
@@ -170,14 +188,6 @@ class WebSearchDiscoverySource(BaseEventScraper):
         self._pages_per_domain: Counter = Counter()
 
     # ---- lazily built dependencies ----------------------------------------------------------
-
-    @property
-    def search(self):
-        if self._search is None:
-            from src.net.brave import BraveSearchClient
-
-            self._search = BraveSearchClient()
-        return self._search
 
     @property
     def http(self):
@@ -207,35 +217,27 @@ class WebSearchDiscoverySource(BaseEventScraper):
 
     def fetch_raw_events(self) -> List[Dict[str, Any]]:
         if self.screener is None:
-            logger.warning("[WEB] No Jev screener: AI approval impossible, web discovery skipped.")
+            logger.warning(f"[{self.source_name.upper()}] No Jev screener: AI approval impossible, discovery skipped.")
             return []
         raw: List[Dict[str, Any]] = []
-        remembered = self.store.active_sites(self.city)
-        seen_urls = {s["url"] for s in remembered}
+        remembered = self.store.active_sites(self.city, via=self.via) if self.remember_sites else []
+        self._seen_urls = {s["url"] for s in remembered}
+        self._seen_domains = {registrable_domain(s["url"]) for s in remembered}
         for site in remembered:
             raw.extend(self._read_remembered(site))
-
-        from src.net.brave import BudgetExhausted
-
-        for template in self.queries:
-            try:
-                results = self.search.search(template.format(city=self.city_name))
-            except BudgetExhausted:
-                logger.info("[WEB] Brave query budget reached for this run.")
-                break
-            except Exception as err:
-                logger.warning(f"[WEB] Search failed for '{template}': {err}")
+        for url, label in self._candidates():
+            if url in self._seen_urls:
                 continue
-            self.metrics["queries"] += 1
-            for result in results:
-                if result.url in seen_urls:
-                    continue
-                seen_urls.add(result.url)
-                if self.metrics["pages_checked"] >= self.max_pages:
-                    break
-                raw.extend(self._consider(result.url))
-        logger.info(f"[WEB] '{self.city}': {dict(self.metrics)}")
+            self._seen_urls.add(url)
+            if self.metrics["pages_checked"] >= self.max_pages:
+                break
+            raw.extend(self._consider(url, label))
+        logger.info(f"[{self.source_name.upper()}] '{self.city}': {dict(self.metrics)}")
         return raw
+
+    def _candidates(self):
+        """Yields (page url, source label or None). Implemented by subclasses."""
+        return iter(())
 
     def _skip_reason(self, url: str) -> Optional[str]:
         from src.net.http import is_blocked_domain
@@ -251,7 +253,7 @@ class WebSearchDiscoverySource(BaseEventScraper):
             return "skipped_domain_budget"
         return None
 
-    def _consider(self, url: str) -> List[Dict[str, Any]]:
+    def _consider(self, url: str, label: Optional[str] = None) -> List[Dict[str, Any]]:
         reason = self._skip_reason(url)
         if reason:
             self.metrics[reason] += 1
@@ -268,8 +270,9 @@ class WebSearchDiscoverySource(BaseEventScraper):
             logger.debug(f"[WEB] rejected {registrable_domain(url)}: {rej.reason}")
             return []
         self.metrics["approved"] += 1
-        label = site_name(page.text) or registrable_domain(page.url)
-        self.store.remember(self.city, page.url, label, kind, scores, terms_url)
+        label = label or site_name(page.text) or registrable_domain(page.url)
+        if self.remember_sites:
+            self.store.remember(self.city, page.url, label, kind, scores, terms_url, via=self.via)
         return [dict(e, _page_url=page.url, _label=label) for e in events]
 
     def _read_remembered(self, site: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -364,7 +367,7 @@ class WebSearchDiscoverySource(BaseEventScraper):
             page_url = item["_page_url"]
             digest = sha16(item.get("event_url") or f"{page_url}|{start.isoformat()}|{item['title']}")
             out.append({
-                "event_id": f"web_{digest}",
+                "event_id": f"{self.id_prefix}_{digest}",
                 "city": self.city,
                 "title": item["title"],
                 "source": item["_label"],
@@ -376,9 +379,52 @@ class WebSearchDiscoverySource(BaseEventScraper):
                 "status": "canceled" if item.get("canceled") else "live",
                 "is_canceled": bool(item.get("canceled")),
                 "pictureurl": item.get("picture"),
-                "origin": "web",
+                "origin": self.origin_kind,
             })
         return out
+
+
+class WebSearchDiscoverySource(DiscoveryBase):
+    """
+    Candidates from Brave Search. Memoryless by default (WEB_SEARCH_REMEMBER_SITES=false): nothing
+    from search results is stored; only events read from the organizers' own pages are kept.
+    """
+
+    source_name = "Web"
+    via = "search"
+
+    def __init__(self, city: str, search=None, queries: Optional[List[str]] = None, remember_sites: Optional[bool] = None, **kwargs):
+        super().__init__(city, **kwargs)
+        self._search = search
+        self.queries = queries if queries is not None else load_queries("discovery")
+        self.remember_sites = (
+            os.getenv("WEB_SEARCH_REMEMBER_SITES", "false").strip().lower() in ("1", "true", "yes", "on")
+            if remember_sites is None else remember_sites
+        )
+
+    @property
+    def search(self):
+        if self._search is None:
+            from src.net.brave import BraveSearchClient
+
+            self._search = BraveSearchClient()
+        return self._search
+
+    def _candidates(self):
+        from src.net.brave import BudgetExhausted
+
+        for template in self.queries:
+            try:
+                results = self.search.search(template.format(city=self.city_name))
+            except BudgetExhausted:
+                logger.info("[WEB] Brave query budget reached for this run.")
+                return
+            except Exception as err:
+                logger.warning(f"[WEB] Search failed for '{template}': {err}")
+                continue
+            self.metrics["queries"] += 1
+            for result in results:
+                yield result.url, None
 
 
 def web_search_enabled() -> bool:

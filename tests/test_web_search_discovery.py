@@ -15,11 +15,11 @@ class MemoryStore(SiteStore):
         self.sites = list(sites or [])
         self.remembered, self.successes, self.failures = [], [], []
 
-    def active_sites(self, city):
-        return [s for s in self.sites if s.get("city", city) == city]
+    def active_sites(self, city, via=None):
+        return [s for s in self.sites if s.get("city", city) == city and (via is None or s.get("via", "search") == via)]
 
-    def remember(self, city, url, label, kind, scores, terms_url):
-        self.remembered.append({"city": city, "url": url, "label": label, "kind": kind, "scores": scores, "terms": terms_url})
+    def remember(self, city, url, label, kind, scores, terms_url, via="search"):
+        self.remembered.append({"city": city, "url": url, "label": label, "kind": kind, "scores": scores, "terms": terms_url, "via": via})
 
     def record_success(self, site_id):
         self.successes.append(site_id)
@@ -39,7 +39,8 @@ def _routes(**overrides):
     return routes
 
 
-def _source(routes=None, screener=None, extractor=None, store=None, max_queries=1, queries=("family events {city}",), robots=None):
+def _source(routes=None, screener=None, extractor=None, store=None, max_queries=1, queries=("family events {city}",), robots=None,
+            remember_sites=True):
     session = FakeSession(routes if routes is not None else _routes(), **({"default_robots": robots} if robots else {}))
     http = PoliteHttpClient(session=session, min_interval_seconds=0, resolver=public_resolver, sleep=lambda s: None)
     calendars = [{"url": "https://www.scienceworld.ca/events/", "enabled": True},
@@ -47,7 +48,7 @@ def _source(routes=None, screener=None, extractor=None, store=None, max_queries=
     src = WebSearchDiscoverySource(
         "Vancouver, BC, Canada", search=FakeBrave("brave_discovery.json", max_queries=max_queries), http=http,
         screener=screener or FakeScreener(answers={"forbids": 0.05}), extractor=extractor or FakeExtractor(), store=store or MemoryStore(),
-        queries=list(queries), blocked={"stubhub.ca"}, calendars=calendars,
+        queries=list(queries), blocked={"stubhub.ca"}, calendars=calendars, remember_sites=remember_sites,
     )
     return src, session
 
@@ -122,3 +123,16 @@ def test_no_screener_means_no_discovery():
     src, session = _source()
     src._screener = False
     assert src.fetch_raw_events() == [] and session.requested == []
+
+
+def test_brave_discovery_is_memoryless_by_default(monkeypatch):
+    monkeypatch.delenv("WEB_SEARCH_REMEMBER_SITES", raising=False)
+    store = MemoryStore(sites=[{"id": 9, "url": RIVERSIDE, "source_label": "Riverside", "kind": "html"}])
+    session = FakeSession(_routes())
+    http = PoliteHttpClient(session=session, min_interval_seconds=0, resolver=public_resolver, sleep=lambda s: None)
+    src = WebSearchDiscoverySource("Vancouver, BC, Canada", search=FakeBrave("brave_discovery.json"), http=http,
+                                   screener=FakeScreener(answers={"forbids": 0.05}), extractor=FakeExtractor(), store=store,
+                                   queries=["q {city}"], blocked=set(), calendars=[])
+    events = src.fetch_raw_events()
+    assert events  # events from organizers' pages are still used
+    assert store.remembered == [] and store.successes == []  # nothing from search is stored or re-read

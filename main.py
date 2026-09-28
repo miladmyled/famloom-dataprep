@@ -29,6 +29,7 @@ from src.etl.curated_calendars import CuratedCalendarSource, curated_enabled
 from src.etl.web_search_discovery import SiteStore, WebSearchDiscoverySource, web_search_enabled
 from src.etl.facebook_snippets import FacebookSnippetSource, facebook_snippets_enabled
 from src.etl.instagram_business import InstagramBusinessSource, instagram_enabled
+from src.etl.official_sites import OfficialSitesDiscoverySource, official_sites_enabled
 from src.etl.base import BaseEventScraper
 from src.classify.cache import ClassificationCache
 from src.classify.factory import get_classifier
@@ -111,6 +112,9 @@ def build_scraper_tasks(city: str, shared: Optional[SharedWebClients] = None) ->
         curated = CuratedCalendarSource(city=city, http=shared.http, screener=shared.screener, extractor=shared.extractor)
         if curated.calendars:
             tasks.append((f"CuratedCalendars[{city}]", "curated", curated))
+    if official_sites_enabled():
+        tasks.append((f"OfficialSites[{city}]", "official", OfficialSitesDiscoverySource(
+            city=city, http=shared.http, screener=shared.screener, extractor=shared.extractor, store=shared.store)))
     if web_search_enabled():
         if _brave_configured():
             tasks.append((f"WebDiscovery[{city}]", "web", WebSearchDiscoverySource(
