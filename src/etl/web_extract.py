@@ -92,6 +92,7 @@ def normalize_jsonld_event(node: Dict[str, Any], page_url: str) -> Optional[Dict
         "description": _text(node.get("description")),
         "event_url": urljoin(page_url, url) if url else None,
         "canceled": "EventCancelled" in status,
+        "picture": jsonld_image(node, page_url),
     }
 
 
@@ -134,3 +135,96 @@ def find_terms_link(html: str, page_url: str) -> Optional[str]:
         if pattern.search(label) and not re.search(r"privacy", a["href"], re.I):
             return urljoin(page_url, a["href"])
     return None
+
+
+# ---- pictures and per-event links ----------------------------------------------------------------
+
+_NOT_A_PICTURE = re.compile(r"logo|icon|favicon|sprite|placeholder|spacer|pixel|blank|avatar|badge|button|\.svg(\?|$)|/emoji/", re.I)
+
+
+def clean_image_url(url: Optional[str], base_url: str) -> Optional[str]:
+    """Absolute https URL of a real picture, or None for logos, icons, svgs, data: URIs, pixels."""
+    if not url or not isinstance(url, str):
+        return None
+    url = url.strip().split(" ")[0]  # srcset entries look like "url 2x"
+    if not url or url.startswith("data:"):
+        return None
+    absolute = urljoin(base_url, url)
+    if not absolute.startswith("https://") or _NOT_A_PICTURE.search(absolute):
+        return None
+    from src.net.http import host_of, is_blocked_domain
+
+    if is_blocked_domain(host_of(absolute)):
+        return None
+    return absolute
+
+
+def jsonld_image(node: Dict[str, Any], base_url: str) -> Optional[str]:
+    value = node.get("image")
+    candidates = value if isinstance(value, list) else [value]
+    for item in candidates:
+        if isinstance(item, dict):
+            item = item.get("url") or item.get("contentUrl")
+        picture = clean_image_url(item, base_url)
+        if picture:
+            return picture
+    return None
+
+
+def og_image(html: str, base_url: str) -> Optional[str]:
+    soup = soup_of(html)
+    for attrs in ({"property": "og:image"}, {"property": "og:image:secure_url"}, {"name": "twitter:image"}):
+        tag = soup.find("meta", attrs=attrs)
+        picture = clean_image_url(tag.get("content") if tag else None, base_url)
+        if picture:
+            return picture
+    return None
+
+
+def _img_src(img) -> Optional[str]:
+    for attr in ("src", "data-src", "data-lazy-src", "data-original"):
+        if img.get(attr):
+            return img.get(attr)
+    srcset = img.get("srcset") or img.get("data-srcset")
+    return srcset.split(",")[0] if srcset else None
+
+
+def link_cards(html: str, base_url: str) -> List[Dict[str, Optional[str]]]:
+    """Every link on the page with its text and the picture of its card (inside the link or up to
+    three parent elements), used to give extracted events their own URL and picture."""
+    soup = soup_of(html)
+    for tag in soup(["nav", "header", "footer", "script", "style"]):
+        tag.decompose()
+    cards = []
+    for a in soup.find_all("a", href=True):
+        href = a["href"].strip()
+        if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+            continue
+        text = _WS_RE.sub(" ", a.get_text(" ", strip=True))
+        img, node = a.find("img"), a
+        for _ in range(3):
+            if img is not None or node.parent is None:
+                break
+            node = node.parent
+            if len(node.find_all("a", href=True)) > 1:
+                break  # a container shared with other links is not this event's card
+            img = node.find("img")
+        if not text:
+            text = (img.get("alt") or "").strip() if img is not None else ""
+        if not text:
+            continue
+        cards.append({"text": text, "href": urljoin(base_url, href),
+                      "image": clean_image_url(_img_src(img), base_url) if img is not None else None})
+    return cards
+
+
+def match_card(title: str, cards: List[Dict[str, Optional[str]]], threshold: int = 85) -> Optional[Dict[str, Optional[str]]]:
+    """The link card whose text best matches an event title (rapidfuzz token_set_ratio)."""
+    from rapidfuzz import fuzz
+
+    best, best_score = None, threshold - 1
+    for card in cards:
+        score = fuzz.token_set_ratio(title.lower(), card["text"].lower())
+        if score > best_score and len(card["text"]) >= 4:
+            best, best_score = card, score
+    return best

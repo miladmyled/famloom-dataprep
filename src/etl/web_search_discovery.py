@@ -338,6 +338,12 @@ class WebSearchDiscoverySource(BaseEventScraper):
         return scores
 
     def _events_from(self, page, require_screen: bool = False):
+        events, kind = self._raw_events_from(page, require_screen)
+        from src.etl.enrich import enrich_events
+
+        return enrich_events(events, page.text, page.url, self.http), kind
+
+    def _raw_events_from(self, page, require_screen: bool = False):
         found = parse_jsonld(page.text, page.url, self.tz)
         if found:
             return found, "jsonld"
@@ -369,7 +375,7 @@ class WebSearchDiscoverySource(BaseEventScraper):
                 "location_summary": item.get("location_summary"),
                 "status": "canceled" if item.get("canceled") else "live",
                 "is_canceled": bool(item.get("canceled")),
-                "pictureurl": None,
+                "pictureurl": item.get("picture"),
                 "origin": "web",
             })
         return out

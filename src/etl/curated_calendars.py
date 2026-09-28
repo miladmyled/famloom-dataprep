@@ -80,8 +80,27 @@ def parse_ical(text: str, tz) -> List[Dict[str, Any]]:
             "description": str(component.get("DESCRIPTION") or "").strip() or None,
             "event_url": str(component.get("URL") or "").strip() or None,
             "canceled": str(component.get("STATUS") or "").upper() == "CANCELLED",
+            "picture": _ical_picture(component),
         })
     return events
+
+
+def _ical_picture(component) -> Optional[str]:
+    """RFC 7986 IMAGE, or an ATTACH with an image media type."""
+    from src.etl.web_extract import clean_image_url
+
+    for key in ("IMAGE", "ATTACH"):
+        values = component.get(key)
+        for value in (values if isinstance(values, list) else [values]):
+            if value is None:
+                continue
+            fmt = str(getattr(value, "params", {}).get("FMTTYPE", "") if hasattr(value, "params") else "")
+            if key == "ATTACH" and fmt and not fmt.lower().startswith("image/"):
+                continue
+            picture = clean_image_url(str(value), "https://invalid.example/")
+            if picture:
+                return picture
+    return None
 
 
 def parse_jsonld(html: str, page_url: str, tz) -> List[Dict[str, Any]]:
@@ -97,6 +116,7 @@ def parse_jsonld(html: str, page_url: str, tz) -> List[Dict[str, Any]]:
                 "description": item["description"],
                 "event_url": item["event_url"],
                 "canceled": item["canceled"],
+                "picture": item.get("picture"),
             })
     return [e for e in events if e["start_date"]]
 
@@ -177,10 +197,12 @@ class CuratedCalendarSource(BaseEventScraper):
             feed = feedparser.parse(page.text)
             text = "\n\n".join(f"{e.get('title', '')}\n{e.get('summary', '')}\n{e.get('link', '')}" for e in feed.entries)
             return self._screen_and_extract(text, url)
+        from src.etl.enrich import enrich_events
+
         found = parse_jsonld(page.text, url, self.tz)
         if found or kind == "jsonld":
-            return found
-        return self._screen_and_extract(main_text(page.text), url)
+            return enrich_events(found, page.text, page.url, self.http)
+        return enrich_events(self._screen_and_extract(main_text(page.text), url), page.text, page.url, self.http)
 
     def _screen_and_extract(self, text: str, page_url: str) -> List[Dict[str, Any]]:
         from src.classify.screen import PAGE_LISTS_EVENTS
@@ -214,7 +236,7 @@ class CuratedCalendarSource(BaseEventScraper):
                 "location_summary": item.get("location_summary"),
                 "status": "canceled" if item.get("canceled") else "live",
                 "is_canceled": bool(item.get("canceled")),
-                "pictureurl": None,
+                "pictureurl": item.get("picture"),
                 "origin": "curated",
             })
         return normalized
