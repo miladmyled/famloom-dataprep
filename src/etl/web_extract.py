@@ -237,3 +237,31 @@ def match_card(title: str, cards: List[Dict[str, Optional[str]]], threshold: int
         if score > best_score:
             best, best_score = card, score
     return best
+
+
+def content_image(html: str, base_url: str, title: str) -> Optional[str]:
+    """Best event picture in the page body when there is no og:image: an image whose alt/title
+    text resembles the event title, or whose path says it is an event image. Maps, thumbnails
+    and site chrome (header/nav/footer) are ignored; None when nothing clearly fits."""
+    from rapidfuzz import fuzz
+
+    soup = soup_of(html)
+    for tag in soup(["nav", "header", "footer", "script", "style"]):
+        tag.decompose()
+    best, best_score = None, 0
+    for img in soup.find_all("img"):
+        src = clean_image_url(_img_src(img), base_url)
+        if not src:
+            continue
+        lowered = src.lower()
+        if any(k in lowered for k in ("map", "thumbnail", "/thumb", "banner-ad", "sponsor")):
+            continue
+        label = f"{img.get('alt') or ''} {img.get('title') or ''}".strip()
+        score = 0
+        if label and fuzz.token_set_ratio(title.lower(), label.lower()) >= 60:
+            score += 3
+        if "event" in lowered:
+            score += 2
+        if score > best_score:
+            best, best_score = src, score
+    return best

@@ -3,15 +3,15 @@ Give events read from web pages their own link and picture:
   1. picture/link already in structured data (JSON-LD image, iCal IMAGE/ATTACH) are kept;
   2. events without a link are matched to a link on the listing page by title, and take the
      picture of that link's card;
-  3. events that still have no picture get the og:image / JSON-LD image of their own page
-     (polite fetch, capped per page).
+  3. events that still have no picture get the og:image / JSON-LD image of their own page, or
+     the body image that clearly belongs to the event (polite fetch, capped per page).
 Organizers' own promotional pictures only; Facebook/Instagram pictures are never used.
 """
 import logging
 import os
 from typing import Any, Dict, List
 
-from src.etl.web_extract import jsonld_events, jsonld_image, link_cards, match_card, og_image
+from src.etl.web_extract import content_image, jsonld_events, jsonld_image, link_cards, match_card, og_image
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +59,8 @@ def enrich_events(events: List[Dict[str, Any]], page_html: str, page_url: str, h
                 picture = jsonld_image(node, detail.url)
                 if picture:
                     break
+        if not picture:
+            picture = content_image(detail.text, detail.url, event.get("title", ""))
         if picture:
             event["picture"] = picture
     return events

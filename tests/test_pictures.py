@@ -111,3 +111,16 @@ def test_ical_relative_and_self_links():
     assert _ical_event_url(e, feed) is None
     e2 = Event(); e2.add("URL", "/Calendar.aspx?EID=5")
     assert _ical_event_url(e2, feed) == "https://www.coquitlam.ca/Calendar.aspx?EID=5"
+
+
+def test_content_image_fallback_prefers_event_picture_over_map_and_footer():
+    from src.etl.web_extract import content_image
+
+    html = """<html><body><main>
+      <img src="/files/nvcl/map_0.jpg" alt="Map">
+      <img alt="Coast Salish art on handmade drum" title="Indigenous history and culture series"
+           src="/files/styles/nvcl_event_image/public/drum.jpg?itok=x">
+      </main><footer><img src="/files/footer/welcome.jpg"></footer></body></html>"""
+    assert content_image(html, "https://www.nvcl.ca/events/x", "Indigenous history and culture series") == \
+        "https://www.nvcl.ca/files/styles/nvcl_event_image/public/drum.jpg?itok=x"
+    assert content_image("<main><img src='/a/photo.jpg' alt='Our staff'></main>", "https://x.example/", "Pancake breakfast") is None
