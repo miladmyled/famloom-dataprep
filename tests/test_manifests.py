@@ -39,4 +39,5 @@ def test_phase2_flags_in_scraper_manifest():
     assert env["CURATED_CALENDARS_ENABLED"] == "true"
     assert env["WEB_SEARCH_ENABLED"] == "true"
     assert env["FACEBOOK_SNIPPETS_ENABLED"] == "false"
+    assert env["INSTAGRAM_ENABLED"] == "false"
     assert env["CRAWLER_CONTACT_EMAIL"] == "miladmyled@gmail.com"
