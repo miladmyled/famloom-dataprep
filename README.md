@@ -31,22 +31,20 @@ Merging to `main` builds the image and deploys production. Work on feature branc
 | Curated calendars | `CURATED_CALENDARS_ENABLED` | Jev + Gemini for HTML pages | `config/sources/curated_calendars.yaml`, human approved |
 | Official sites | `OFFICIAL_SITES_ENABLED` | Jev, Gemini | city/venue websites from Wikidata (CC0) → events page → automatic checks + terms check + AI approval; approved pages remembered in `event_source_sites` |
 | Web search | `WEB_SEARCH_ENABLED` (false in prod) | `BRAVE_SEARCH_API_KEY`, Jev, Gemini | same checks; memoryless unless `WEB_SEARCH_REMEMBER_SITES=true` (Brave storage rights) |
-| Facebook snippets | `FACEBOOK_SNIPPETS_ENABLED` (false) | Brave, Jev, Gemini | search-result text only, facebook.com never requested |
-| Instagram | `INSTAGRAM_ENABLED` (false) | `META_*` | Business Discovery API, approved professional accounts only |
 
 A source whose key is missing logs a warning and is skipped; the run continues.
 De-duplication keeps the higher-priority source: Eventbrite/Meetup > curated and official sites >
-Instagram > web search > Facebook snippets.
+web search.
 
 Curated and discovered events get the organizer's own picture (`pictureurl`) from structured
-data, the event's card on the listing, or the event page (`og:image`); Instagram and Facebook
-events never carry pictures.
+data, the event's card on the listing, or the event page (`og:image`). Events without a picture
+are skipped (`REQUIRE_PICTURE=true`).
 
 ### Crawling rules
 
 All web requests go through `src/net/http.py`: User-Agent `FamLoomBot/1.0 (+mailto:<CRAWLER_CONTACT_EMAIL>)`,
-robots.txt obeyed (403 = no), per-domain rate limit, 3 MB cap, Facebook/Instagram and private
-addresses refused. No logins, no CAPTCHA solving, no stealth, cookie banners are never accepted.
+robots.txt obeyed (403 = no), per-domain rate limit, 3 MB cap, Facebook/Instagram hosts and private
+addresses always refused. No logins, no CAPTCHA solving, no stealth, cookie banners are never accepted.
 
 ## Classification
 
@@ -61,7 +59,7 @@ public event, couple leisure outing (family score = the strongest), singles/dati
 
 Copy `.env.example` to `.env` (git-ignored) and fill in values. Never print or commit secrets.
 New variables for the production Secret `dataprep-secrets`: `TYPESAFE_API_KEY`, `GEMINI_API_KEY`,
-`GEMINI_MODEL`, `BRAVE_SEARCH_API_KEY`, and later `META_IG_USER_ID`, `META_ACCESS_TOKEN`.
+`GEMINI_MODEL`, `BRAVE_SEARCH_API_KEY`.
 Non-secret settings (flags, thresholds, crawler contact) are in `k8s-manifests/*.yaml`.
 
 ## Running locally (dev database only)
@@ -81,10 +79,10 @@ refuse the production database (`x3db`).
 
 | Script | Purpose |
 |---|---|
-| `scripts/check_env.py` | variables set/missing, smoke-test DB tables, Jev, Gemini, Brave, Meta, Kafka |
+| `scripts/check_env.py` | variables set/missing, smoke-test DB tables, Jev, Gemini, Brave, Kafka |
 | `scripts/run_pipeline_dev.py` | dev run for chosen cities/sources: `--no-publish`, `--publish-direct`, `--publish` (local Kafka) |
 | `scripts/evaluate_classifier.py` | build a labeling sheet (`--sample`) and grade thresholds (`--evaluate`) |
-| `scripts/evaluate_snippet_yield.py` | GATE 2b: what Facebook snippets would add, no publishing |
+| `scripts/reset_dev_events.py` | back up and empty dev `city_events`/tags before a fresh load (never TRUNCATE) |
 | `janitor.py --dry-run / --backup` | preview / back up before the classified removal |
 | `scripts/load_events_to_db.py` | legacy direct loader, now classifies like `main.py` |
 | `scripts/backfill_interest_tags.py` | legacy keyword backfill (superseded; existing events simply expire) |
@@ -96,10 +94,6 @@ refuse the production database (`x3db`).
 `enabled`, and record `robots_checked` / `terms_checked` with notes. Prefer iCal/RSS feeds. Sites
 that forbid automated access stay listed with `enabled: false` and the reason (they are then also
 blocked for web discovery).
-
-**An Instagram account:** add `city`, `username`, `display_name`, `why`, `enabled` to
-`config/sources/instagram_accounts.yaml`. Only public Business/Creator accounts that announce dated
-events; needs Meta App Review before `INSTAGRAM_ENABLED=true`.
 
 **A new city:** nothing to do. Cities come from `family_profiles.location`; Eventbrite, Meetup and
 official-site discovery (Wikidata) cover a new city on the next run. Add a `city_primary_language.yaml` entry if the

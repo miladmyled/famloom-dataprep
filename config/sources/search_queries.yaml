@@ -13,8 +13,3 @@ discovery:
   - "toddler drop-in {city}"
   - "family hike {city}"
   - "family friendly live music {city} restaurant"
-
-# Facebook event snippets (search results only; facebook.com is never requested)
-facebook_snippets:
-  - 'site:facebook.com/events "{city}" family'
-  - 'site:facebook.com/events "{city}" kids'

@@ -5,7 +5,7 @@ Give events read from web pages their own link and picture:
      picture of that link's card;
   3. events that still have no picture get the og:image / JSON-LD image of their own page, or
      the body image that clearly belongs to the event (polite fetch, capped per page).
-Organizers' own promotional pictures only; Facebook/Instagram pictures are never used.
+Organizers' own promotional pictures only; pictures on Facebook/Instagram hosts are never used.
 """
 import logging
 import os

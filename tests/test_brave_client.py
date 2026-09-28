@@ -23,7 +23,7 @@ def _client(responses, max_queries=5):
 
 
 def test_request_shape_and_parsing():
-    client, session = _client([_resp(200, json.loads(fixture("brave_facebook.json")))])
+    client, session = _client([_resp(200, json.loads(fixture("brave_discovery.json")))])
     results = client.search("family events Vancouver")
     url = session.get.call_args[0][0]
     kwargs = session.get.call_args[1]
@@ -31,9 +31,8 @@ def test_request_shape_and_parsing():
     assert kwargs["headers"]["X-Subscription-Token"] == "k"
     assert kwargs["params"] == {"q": "family events Vancouver", "count": 20, "country": "CA", "search_lang": "en",
                                 "freshness": "pm", "extra_snippets": "true"}
-    assert results[0].url == "https://www.facebook.com/events/1234567890123/"
-    assert results[0].extra_snippets == ["Hosted by a community group"]
-    assert results[0].page_age == "2026-10-20T00:00:00"
+    assert results[0].url == "https://www.harbourscience.example/events"
+    assert results[0].title == "Harbour Science Centre - Events" and len(results) == 6
 
 
 def test_budget_is_enforced():

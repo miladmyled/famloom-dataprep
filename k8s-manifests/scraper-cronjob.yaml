@@ -67,12 +67,6 @@ spec:
               value: "false"
             - name: WEB_SEARCH_REMEMBER_SITES
               value: "false"
-            - name: FACEBOOK_SNIPPETS_ENABLED
-              value: "false"   # decided at GATE 2b
-            - name: INSTAGRAM_ENABLED
-              value: "false"   # until Meta App Review passes
-            - name: META_GRAPH_API_VERSION
-              value: "v26.0"
             - name: CRAWLER_CONTACT_EMAIL
               value: "miladmyled@gmail.com"
             - name: BRAVE_MAX_QUERIES_PER_RUN

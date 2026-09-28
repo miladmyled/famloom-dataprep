@@ -47,9 +47,11 @@ the network; no scraping of Facebook/Instagram or login-walled content.
    `city_events` rows (`JANITOR_REMOVE_CLASSIFIED`). Tags cascade; Activities keep working
    (`source_city_event_id` is `ON DELETE SET NULL`).
 7. **Sources (accredited only).** Eventbrite, Meetup, a human-approved curated list of calendars
-   (13 approved at GATE 2a), web pages found through Brave Search that pass automatic checks and
-   AI approval, Facebook events from search snippets only, and Instagram Business Discovery for
-   approved professional accounts. Everything else is rejected.
+   (13 approved at GATE 2a), official sites found through Wikidata and web pages found through
+   Brave Search that pass automatic checks and AI approval. Everything else is rejected.
+   **Facebook and Instagram sources were built and then removed (owner's decision 2026-09-27):**
+   Brave indexes almost no Facebook event pages (GATE 2b) and Instagram needs Meta App Review;
+   the crawler still refuses every Facebook/Instagram host.
 8. **New cities need no human approval.** Official-site discovery takes the official websites
    of the city and its libraries, museums, theatres, community and science centres from
    **Wikidata (CC0)**, finds each site's events page on the site itself, checks
@@ -65,12 +67,8 @@ the network; no scraping of Facebook/Instagram or login-walled content.
    or the event page's `og:image` / clearly matching body image (detail pages fetched politely,
    capped per page, never on Eventbrite/Meetup/resale domains). Logos, icons, SVGs and non-https
    images are skipped. Extracted events are linked to their own page on the listing when the
-   title matches. **Instagram events carry the post's own picture** (`media_url`, or
-   `thumbnail_url` for videos) from the Business Discovery API, with the permalink to the original
-   post (owner's decision 2026-09-27: the posts are public event announcements and link back;
-   confirm the use in Meta App Review). Instagram CDN links are signed and expire after some days;
-   each run re-saves the current link. Facebook-snippet events have no picture: Facebook is never
-   requested and Brave thumbnails would mean storing search results.
+   title matches. **Events without a picture are skipped** (`REQUIRE_PICTURE=true`, owner's
+   decision 2026-09-27): they are neither classified nor published (metric `no_picture`).
 9. **Schedule:** scraper twice a day (05:00 and 16:00 America/Vancouver, cluster v1.35 supports
    `timeZone`); janitor unchanged (daily 01:00 UTC).
 10. **Schema ownership:** two additive app migrations (`city_event_classifications`,
@@ -95,7 +93,7 @@ the network; no scraping of Facebook/Instagram or login-walled content.
 - Released apps show a language chip (e.g. "French") for events held in a non-primary language.
   App ranking does not yet use `family_profiles.languages` (follow-up for the app owner).
 - Costs: Jev ≈ $0.0002 per classified event (cents per month), Gemini Flash-Lite cents per
-  month, Brave ≈ $5 per 1,000 queries (≈ 60 queries per run budgeted), Meta free.
+  month, Brave ≈ $5 per 1,000 queries (≈ 60 queries per run budgeted, off in production).
 - The Kafka transport is unchanged and was not exercised on dev (no dev Kafka; manual dev runs
   use `run_pipeline_dev.py --publish-direct`). Verify from production logs after the first run.
 
@@ -114,23 +112,21 @@ the network; no scraping of Facebook/Instagram or login-walled content.
   `config/sources/blocked_domains.yaml` and purge its events.
 - **Brave:** storing results requires a plan that explicitly grants storage rights; the
   "Search" plan in use does not list them. Therefore Brave search is memoryless and disabled in
-  production (`WEB_SEARCH_ENABLED=false`) until Brave (api-sales@brave.com) confirms; Facebook
-  snippets, which would store snippet-derived data, stay disabled. Official-site discovery uses
-  Wikidata (CC0) and needs no search API.
+  production (`WEB_SEARCH_ENABLED=false`) until Brave (api-sales@brave.com) confirms.
+  Official-site discovery uses Wikidata (CC0) and needs no search API.
 - **Pictures** are hotlinked from the organizer's site (the app loads them from there), the same
   way Eventbrite pictures are used today.
-- **Meta:** Instagram needs App Review (instagram_basic, pages_read_engagement, and related
-  permissions); confirm in review that showing extracted event info with a link back is allowed.
 
 ## GATE 2b result
 
 Brave indexes almost no `facebook.com/events` pages (0 results with the one-month freshness
-filter, 2 without for Vancouver). Facebook snippets stay disabled (`FACEBOOK_SNIPPETS_ENABLED=false`).
+filter, 2 without for Vancouver). The Facebook-snippet source was removed, together with the
+Instagram source (which needed Meta App Review). Revisit only with an approved Meta integration.
 
 ## How to change course
 
-- Switch sources: `CURATED_CALENDARS_ENABLED`, `WEB_SEARCH_ENABLED`, `FACEBOOK_SNIPPETS_ENABLED`,
-  `INSTAGRAM_ENABLED`.
+- Switch sources: `CURATED_CALENDARS_ENABLED`, `OFFICIAL_SITES_ENABLED`, `WEB_SEARCH_ENABLED`.
+- Publish events without pictures: `REQUIRE_PICTURE=false`.
 - Switch classifier: `CLASSIFIER_PROVIDER` / `CLASSIFIER_FALLBACK` (`jev`, `gemini`, `none`).
 - Tune: `FAMILY_ACCEPT_THRESHOLD`, `FAMILY_REVIEW_THRESHOLD`, `TAG_THRESHOLD`,
   `LANGUAGE_THRESHOLD`, `SINGLES_REJECT_THRESHOLD`, `ADULT_REJECT_THRESHOLD`, `REVIEW_POLICY`.

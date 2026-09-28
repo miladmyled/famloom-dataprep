@@ -39,8 +39,8 @@ class CityEvent(BaseModel):
     origin: Optional[str] = Field(
         default=None,
         description=(
-            "Kind of source for de-duplication priority (eventbrite, meetup, curated, instagram, web, "
-            "facebook_snippet). In-memory/message only; never written to city_events."
+            "Kind of source for de-duplication priority (eventbrite, meetup, curated, official, web). "
+            "In-memory/message only; never written to city_events."
         ),
     )
     replace_tags: bool = Field(

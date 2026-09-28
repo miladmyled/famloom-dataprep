@@ -27,8 +27,6 @@ from src.etl.kafka_producer import EventKafkaProducer
 from src.etl.dedupe import dedupe_events, load_existing_events
 from src.etl.curated_calendars import CuratedCalendarSource, curated_enabled
 from src.etl.web_search_discovery import SiteStore, WebSearchDiscoverySource, web_search_enabled
-from src.etl.facebook_snippets import FacebookSnippetSource, facebook_snippets_enabled
-from src.etl.instagram_business import InstagramBusinessSource, instagram_enabled
 from src.etl.official_sites import OfficialSitesDiscoverySource, official_sites_enabled
 from src.etl.base import BaseEventScraper
 from src.classify.cache import ClassificationCache
@@ -122,19 +120,6 @@ def build_scraper_tasks(city: str, shared: Optional[SharedWebClients] = None) ->
                 extractor=shared.extractor, store=shared.store)))
         else:
             logger.warning(f"⚠️ WEB_SEARCH_ENABLED but BRAVE_SEARCH_API_KEY missing; web discovery skipped for '{city}'.")
-    if facebook_snippets_enabled():
-        if _brave_configured():
-            tasks.append((f"FacebookSnippets[{city}]", "facebook_snippet", FacebookSnippetSource(
-                city=city, search=shared.search, screener=shared.screener, extractor=shared.extractor)))
-        else:
-            logger.warning(f"⚠️ FACEBOOK_SNIPPETS_ENABLED but BRAVE_SEARCH_API_KEY missing; skipped for '{city}'.")
-    if instagram_enabled():
-        if os.getenv("META_IG_USER_ID") and os.getenv("META_ACCESS_TOKEN"):
-            instagram = InstagramBusinessSource(city=city, screener=shared.screener, extractor=shared.extractor)
-            if instagram.accounts:
-                tasks.append((f"InstagramBusiness[{city}]", "instagram", instagram))
-        else:
-            logger.warning(f"⚠️ INSTAGRAM_ENABLED but META_IG_USER_ID/META_ACCESS_TOKEN missing; skipped for '{city}'.")
     return tasks
 
 

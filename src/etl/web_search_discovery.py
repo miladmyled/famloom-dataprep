@@ -2,7 +2,7 @@
 Web discovery (decisions 9 and 14): pages found through Brave Search are used only if they pass
 every check below; anything else is rejected on the spot and nothing is stored about it.
 
-  1. skip rules      Facebook/Instagram, curated domains (enabled = read by the curated source,
+  1. skip rules      social networks (never fetched), curated domains (enabled = read by the curated source,
                      disabled = blocked), config/sources/blocked_domains.yaml, page budgets
   2. automatic       https only, robots.txt allows us, HTTP 200 without login redirect or password
                      form, no noindex/noai robots meta, size cap

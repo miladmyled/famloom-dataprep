@@ -12,8 +12,6 @@ logger = logging.getLogger(__name__)
 
 # Screening questions (part of what PROMPT_VERSION covers; wording changes are cheap to re-run)
 PAGE_LISTS_EVENTS = "This page lists one or more specific upcoming events with dates."
-SNIPPET_IS_EVENT = "This text describes a specific upcoming event with a date."
-POST_ANNOUNCES_EVENT = "This post announces a specific upcoming event or meetup with a date."
 
 
 class JevScreener:

@@ -40,6 +40,5 @@ def test_phase2_flags_in_scraper_manifest():
     assert env["WEB_SEARCH_ENABLED"] == "false"  # until Brave confirms the plan
     assert env["WEB_SEARCH_REMEMBER_SITES"] == "false"
     assert env["OFFICIAL_SITES_ENABLED"] == "true"
-    assert env["FACEBOOK_SNIPPETS_ENABLED"] == "false"
-    assert env["INSTAGRAM_ENABLED"] == "false"
+    assert not any(k.startswith(("FACEBOOK", "INSTAGRAM", "META_")) for k in env)
     assert env["CRAWLER_CONTACT_EMAIL"] == "miladmyled@gmail.com"

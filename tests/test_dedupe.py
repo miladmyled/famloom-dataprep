@@ -13,11 +13,11 @@ def test_same_event_from_lower_priority_source_is_dropped():
     events = [
         _ev("web_1", "Toddler Science Morning!", "web", minutes=15),
         _ev("curated_1", "Toddler Science Morning", "curated"),
-        _ev("fbsnip_1", "toddler science morning at the centre", "facebook_snippet", minutes=-20),
+        _ev("site_1", "toddler science morning at the centre", "official", minutes=-20),
     ]
     kept, dups = dedupe_events(events)
     assert [e.event_id for e in kept] == ["curated_1"]
-    assert dups == {"web": 1, "facebook_snippet": 1}
+    assert dups == {"web": 1, "official": 1}
 
 
 def test_different_time_or_city_or_title_is_kept():

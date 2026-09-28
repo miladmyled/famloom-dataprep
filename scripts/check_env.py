@@ -19,7 +19,6 @@ EXPECTED = {
     "Jev (TypeSafe)": ["TYPESAFE_API_KEY", "TYPESAFE_MODEL"],
     "Gemini": ["GEMINI_API_KEY", "GEMINI_MODEL"],
     "Brave Search (P2)": ["BRAVE_SEARCH_API_KEY", "CRAWLER_CONTACT_EMAIL"],
-    "Meta Graph (P3)": ["META_GRAPH_API_VERSION", "META_IG_USER_ID", "META_ACCESS_TOKEN"],
 }
 
 
@@ -76,15 +75,6 @@ def check_brave():
     return r.status_code == 200, f"HTTP {r.status_code}"
 
 
-def check_meta():
-    import requests
-
-    version = os.getenv("META_GRAPH_API_VERSION") or "v26.0"
-    r = requests.get(f"https://graph.facebook.com/{version}/{os.environ['META_IG_USER_ID']}",
-                     params={"fields": "id", "access_token": os.environ["META_ACCESS_TOKEN"]}, timeout=15)
-    return r.status_code == 200, f"HTTP {r.status_code}"
-
-
 def check_kafka():
     from confluent_kafka.admin import AdminClient
 
@@ -101,14 +91,13 @@ CHECKS = [
     ("jev", "Jev", ["TYPESAFE_API_KEY"], check_jev, False),
     ("gemini", "Gemini", ["GEMINI_API_KEY", "GEMINI_MODEL"], check_gemini, False),
     ("brave", "Brave", ["BRAVE_SEARCH_API_KEY"], check_brave, False),
-    ("meta", "Meta Graph", ["META_IG_USER_ID", "META_ACCESS_TOKEN"], check_meta, False),
     ("kafka", "Kafka", ["KAFKA_BOOTSTRAP_SERVERS"], check_kafka, False),
 ]
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--skip", action="append", default=[], help="check to skip: db, jev, gemini, brave, meta, kafka")
+    parser.add_argument("--skip", action="append", default=[], help="check to skip: db, jev, gemini, brave, kafka")
     args = parser.parse_args()
 
     print("\nVariables (set / missing):")
