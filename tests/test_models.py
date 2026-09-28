@@ -215,3 +215,33 @@ def test_city_event_pictureurl():
 
 
 
+
+
+def test_fallback_event_id_is_stable_across_processes():
+    """hash() is salted per process; the fallback id must be identical in separate processes."""
+    import subprocess
+    import sys
+
+    code = (
+        "from src.models.event import CityEvent;"
+        "from datetime import datetime, timezone, timedelta;"
+        "e = CityEvent(city='Vancouver', title='t', url='https://example.com/e/1',"
+        " start_date=datetime.now(timezone.utc) + timedelta(days=1));"
+        "print(e.event_id)"
+    )
+    ids = {
+        subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, check=True
+        ).stdout.strip()
+        for _ in range(2)
+    }
+    assert len(ids) == 1
+    only_id = ids.pop()
+    assert only_id.startswith("event_") and len(only_id) == len("event_") + 16
+
+
+def test_stable_fallback_id_is_deterministic_and_source_sensitive():
+    from src.models.event import stable_fallback_id
+
+    assert stable_fallback_id("Meetup", "https://x/1") == stable_fallback_id("Meetup", "https://x/1")
+    assert stable_fallback_id("Meetup", "https://x/1") != stable_fallback_id("Eventbrite", "https://x/1")

@@ -1,0 +1,8 @@
+{"type":"search","web":{"results":[
+ {"title":"Harbour Science Centre - Events","url":"https://www.harbourscience.example/events","description":"Upcoming events"},
+ {"title":"Riverside CC What's on","url":"https://riverside.example/whats-on","description":"Community events"},
+ {"title":"Tickets resale","url":"https://www.stubhub.ca/vancouver","description":"Buy tickets"},
+ {"title":"Facebook event","url":"https://www.facebook.com/events/42/","description":"x"},
+ {"title":"Curated venue","url":"https://www.scienceworld.ca/events/","description":"x"},
+ {"title":"Plain http","url":"http://insecure.example/events","description":"x"}
+]}}

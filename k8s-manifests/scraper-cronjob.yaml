@@ -6,14 +6,20 @@ metadata:
     app: famloom-scraper
     tier: producer-worker
 spec:
-  # Execute exactly every 5 minutes
-  schedule: "*/5 * * * *"
+  # Twice a day, 05:00 and 16:00 Vancouver time (timeZone is GA since Kubernetes 1.27; cluster is v1.35)
+  schedule: "0 5,16 * * *"
+  timeZone: "America/Vancouver"
   # Prevents overlapping executions if a scrape takes longer (e.g. rate-limit backoffs)
   concurrencyPolicy: Forbid
+  # Skip a run that could not start within 15 minutes of its slot; the next slot retries
+  startingDeadlineSeconds: 900
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
+      backoffLimit: 1
+      # Hard cap per run (90 min); a city that does not finish is retried at the next run
+      activeDeadlineSeconds: 5400
       template:
         metadata:
           labels:
@@ -29,7 +35,47 @@ spec:
               value: "1"
             - name: PYTHONIOENCODING
               value: "utf-8"
-            # Injects Kafka and Azure PostgreSQL credentials
+            # Classifier chain and decision rules (keys come from dataprep-secrets)
+            - name: CLASSIFIER_PROVIDER
+              value: "jev"
+            - name: CLASSIFIER_FALLBACK
+              value: "gemini"
+            - name: TYPESAFE_MODEL
+              value: "jev-1.13.0"
+            - name: REVIEW_POLICY
+              value: "drop"
+            # Decision thresholds approved at GATE 1a (2026-09-27)
+            - name: FAMILY_ACCEPT_THRESHOLD
+              value: "0.50"
+            - name: FAMILY_REVIEW_THRESHOLD
+              value: "0.40"
+            - name: TAG_THRESHOLD
+              value: "0.70"
+            - name: LANGUAGE_THRESHOLD
+              value: "0.60"
+            - name: SINGLES_REJECT_THRESHOLD
+              value: "0.60"
+            # Phase 2 sources (keys come from dataprep-secrets; a source with a missing key is skipped)
+            - name: CURATED_CALENDARS_ENABLED
+              value: "true"
+            # Official sites from Wikidata (CC0): the automatic way new cities get calendars
+            - name: OFFICIAL_SITES_ENABLED
+              value: "true"
+            # Brave web search stays off until Brave confirms the Search plan covers our use;
+            # when enabled it is memoryless (nothing from search results is stored)
+            - name: WEB_SEARCH_ENABLED
+              value: "false"
+            - name: WEB_SEARCH_REMEMBER_SITES
+              value: "false"
+            - name: CRAWLER_CONTACT_EMAIL
+              value: "miladmyled@gmail.com"
+            - name: BRAVE_MAX_QUERIES_PER_RUN
+              value: "60"
+            - name: WEB_MAX_PAGES_PER_RUN
+              value: "150"
+            - name: WEB_APPROVAL_THRESHOLD
+              value: "0.75"
+            # Injects Kafka and Azure PostgreSQL credentials, TYPESAFE_API_KEY, GEMINI_API_KEY, GEMINI_MODEL
             envFrom:
             - secretRef:
                 name: dataprep-secrets

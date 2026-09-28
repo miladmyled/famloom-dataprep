@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("PipelineTest")
 
 from src.config.database import get_db_pool
-from src.db.events import init_db_schema, upsert_city_event, get_active_interests
+from src.db.events import CITY_EVENTS_COLUMNS, upsert_city_event, get_active_interests
 from src.models.event import CityEvent
 from src.etl.eventbrite import EventbriteScraper
 from src.etl.transformer import clean_and_validate_event
@@ -35,8 +35,9 @@ def run_tests():
     print("[TEST 1/4] Verifying Azure PostgreSQL & Active Interests...")
     try:
         pool = get_db_pool()
-        cols = init_db_schema(pool)
-        print(f"[SUCCESS] Azure PostgreSQL connected! Active columns: {sorted(list(cols))}")
+        with pool.connection() as conn:
+            conn.execute("SELECT 1")
+        print(f"[SUCCESS] Azure PostgreSQL connected! Written columns: {list(CITY_EVENTS_COLUMNS)}")
         interests = get_active_interests(pool)
         print(f"[SUCCESS] Active interests fetched: {len(interests)} tags found.\n")
     except Exception as e:

@@ -1,0 +1,26 @@
+# Domains web discovery must never use (hand-kept; grows only through a normal PR when a site
+# causes problems or its owner objects). Facebook/Instagram are blocked in code, not here.
+# Curated calendars with enabled: false are also treated as blocked.
+- ticketmaster.ca
+- ticketmaster.com
+- stubhub.ca
+- stubhub.com
+- vividseats.com
+- seatgeek.com
+- viagogo.com
+- allevents.in
+- eventbrite.ca          # read through the Eventbrite API source instead
+- eventbrite.com
+- meetup.com             # read through the Meetup source instead
+- yelp.ca
+- yelp.com
+- tripadvisor.ca
+- tripadvisor.com
+- reddit.com
+- x.com
+- twitter.com
+- tiktok.com
+- youtube.com
+- linkedin.com
+- nextdoor.com
+- nextdoor.ca

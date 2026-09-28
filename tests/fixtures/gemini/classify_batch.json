@@ -1,0 +1,16 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "text": "{\"events\": [{\"event_id\": \"e1\", \"family_score\": 0.91, \"adult_score\": 0.03, \"interest_value_ids\": [42, 9999], \"language_value_ids\": [503, 501, 519]}, {\"event_id\": \"e2\", \"family_score\": 0.2, \"adult_score\": 0.8, \"interest_value_ids\": [71], \"language_value_ids\": []}, {\"event_id\": \"unknown\", \"family_score\": 1, \"adult_score\": 0, \"interest_value_ids\": [], \"language_value_ids\": []}]}"
+          }
+        ]
+      },
+      "finishReason": "STOP"
+    }
+  ],
+  "modelVersion": "gemini-3.5-flash-lite"
+}
