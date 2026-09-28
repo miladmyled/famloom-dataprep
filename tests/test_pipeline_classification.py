@@ -124,3 +124,24 @@ def test_cache_hit_applies_current_thresholds_and_saves_change(taxonomy):
     assert [e.event_id for e in out.publish] == ["e1"]
     assert out.publish[0].tag_ids == [45, 503]          # 42 (0.65) dropped at 0.70, 45 added
     assert cache.rows["e1"].decision == "accept"         # written back for the janitor
+
+
+def test_events_without_picture_are_skipped_before_classification(taxonomy):
+    provider = FakeProvider("jev")
+    events = [make_event("pic"), make_event("nopic", pictureurl=None)]
+    out, cache = _run(events, provider, taxonomy=taxonomy)
+    assert [e.event_id for e in out.publish] == ["pic"]
+    assert provider.calls == [["pic"]]
+    assert out.metrics["Eventbrite"]["no_picture"] == 1
+    assert "nopic" not in cache.rows
+
+
+def test_canceled_event_without_picture_is_still_recorded_for_janitor(taxonomy):
+    out, cache = _run([make_event("c", pictureurl=None, is_canceled=True, status="canceled")], FakeProvider("jev"), taxonomy=taxonomy)
+    assert cache.rows["c"].is_canceled is True and out.publish == []
+
+
+def test_picture_rule_can_be_switched_off(taxonomy):
+    out = classify_events([make_event("nopic", pictureurl=None)], ClassifierChain([FakeProvider("jev")]), FakeCache(), taxonomy, "drop",
+                          require_picture=False)
+    assert [e.event_id for e in out.publish] == ["nopic"]

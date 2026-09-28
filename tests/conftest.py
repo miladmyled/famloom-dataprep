@@ -63,6 +63,7 @@ def make_event(event_id="eventbrite_1", title="Toddler storytime", city="Vancouv
         title=title,
         source=source,
         url=kw.pop("url", f"https://example.com/e/{event_id}"),
+        pictureurl=kw.pop("pictureurl", f"https://example.com/img/{event_id}.jpg"),
         start_date=datetime.now(timezone.utc) + timedelta(days=days),
         **kw,
     )

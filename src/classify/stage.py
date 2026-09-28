@@ -1,4 +1,5 @@
 import logging
+import os
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
@@ -14,6 +15,7 @@ from src.models.event import CityEvent
 logger = logging.getLogger(__name__)
 
 METRIC_KEYS = (
+    "no_picture",
     "cache_hits",
     "classified",
     "accepted",
@@ -79,6 +81,7 @@ def classify_events(
     taxonomy: Taxonomy,
     policy: Optional[str] = None,
     thresholds: Optional[Thresholds] = None,
+    require_picture: Optional[bool] = None,
 ) -> StageOutput:
     """
     Decide which validated events are published and with which tags.
@@ -89,10 +92,14 @@ def classify_events(
       otherwise the event is not published this run and is retried next run;
     - accepted events (and review with REVIEW_POLICY=publish) are published with
       tag_ids = interests U non-primary languages and replace_tags=True;
-    - in keyword-only mode (no AI provider configured) every live event is published as before.
+    - in keyword-only mode (no AI provider configured) every live event is published as before;
+    - with REQUIRE_PICTURE (default on) a live event without a picture is skipped before
+      classification (counted as no_picture); canceled events are still recorded.
     """
     policy = policy or review_policy()
     thresholds = thresholds or Thresholds.from_env()
+    if require_picture is None:
+        require_picture = os.getenv("REQUIRE_PICTURE", "true").strip().lower() in ("1", "true", "yes", "on")
     out = StageOutput()
     if not events:
         return out
@@ -121,6 +128,9 @@ def classify_events(
                 status_updates.append((eid, inp.url, True))
             else:
                 to_save.append(_status_only_result(inp, hashes[eid]))
+            continue
+        if require_picture and not by_id[eid].pictureurl:
+            m["no_picture"] += 1  # not classified, not published (REQUIRE_PICTURE)
             continue
         if prior is not None and prior.provider != "status" and prior.content_hash == hashes[eid]:
             m["cache_hits"] += 1

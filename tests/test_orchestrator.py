@@ -42,6 +42,7 @@ def _ev(event_id, title, source="Eventbrite"):
         "title": title,
         "source": source,
         "url": f"https://example.com/{event_id}",
+        "pictureurl": f"https://example.com/img/{event_id}.jpg",
         "start_date": _future(),
     }
 
