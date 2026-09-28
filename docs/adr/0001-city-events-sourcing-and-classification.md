@@ -71,9 +71,10 @@ the network; no scraping of Facebook/Instagram or login-walled content.
    decision 2026-09-27): they are neither classified nor published (metric `no_picture`).
 9. **Schedule:** scraper twice a day (05:00 and 16:00 America/Vancouver, cluster v1.35 supports
    `timeZone`); janitor unchanged (daily 01:00 UTC).
-10. **Schema ownership:** two additive app migrations (`city_event_classifications`,
-    `event_source_sites`), each granting DML to `dataprep_worker`; dataprep tolerates both being
-    missing.
+10. **Schema ownership:** one additive app migration creates both tables
+    (`web/db/migrations/20260927220000_add_event_source_classification_tables.sql`, app PR #328,
+    already in `dev` and `rc`) and grants DML to `dataprep_worker`; dataprep tolerates both tables
+    being missing and runs no DDL.
 
 ## Options considered
 

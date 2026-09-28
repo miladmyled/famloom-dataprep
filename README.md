@@ -106,8 +106,8 @@ city's province/country is not listed.
 - `event_interest_tags`: dataprep replaces tags of the `interests` and `languages` questions only
   (messages with `replace_tags=true`); tags of other questions are never touched.
 - `questions` / `question_values` (`interests`, `languages`) and `family_profiles.location`: read only.
-- `city_event_classifications` (app migration `20260927184201`): written by the scraper, read by the
+- `city_event_classifications` (app migration `20260927220000`, PR #328): written by the scraper, read by the
   janitor; the app never reads it.
-- `event_source_sites` (app migration `20260927210000`): approved discovered pages, dataprep only.
+- `event_source_sites` (same app migration `20260927220000`, PR #328): approved discovered pages, dataprep only.
 - Removal of rejected/canceled events is done by the janitor (`JANITOR_REMOVE_CLASSIFIED`); deleting
   an event cascades its tags and sets `activities.source_city_event_id` to NULL.
