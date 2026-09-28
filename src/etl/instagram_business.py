@@ -2,7 +2,8 @@
 Instagram Business Discovery source (spec phase 3, shipped with INSTAGRAM_ENABLED=false).
 For each approved professional account of the city (config/sources/instagram_accounts.yaml):
 recent posts (last 21 days) -> Jev screen ("announces a specific upcoming event with a date")
--> Gemini extraction with the post timestamp as reference date. No images, no person names.
+-> Gemini extraction with the post timestamp as reference date. The post's own picture is used
+(decided 2026-09-27); no person names are stored.
 """
 import logging
 import os
@@ -123,7 +124,8 @@ class InstagramBusinessSource(BaseEventScraper):
                 self._count("screened_in")
                 events = self.extractor.extract(post.caption, posted.astimezone(self.tz), self.city, self.tz, source_url=None)
                 for n, event in enumerate(events):
-                    raw.append(dict(event, _media_id=post.media_id, _n=n, _permalink=post.permalink, _label=account.get("display_name")))
+                    raw.append(dict(event, _media_id=post.media_id, _n=n, _permalink=post.permalink,
+                                    _label=account.get("display_name"), _picture=post.picture or None))
                 self._count("extracted", len(events))
         logger.info(f"[INSTAGRAM] '{self.city}': {self.metrics}")
         return raw
@@ -145,7 +147,7 @@ class InstagramBusinessSource(BaseEventScraper):
                 "location_summary": item.get("location_summary"),
                 "status": "live",
                 "is_canceled": False,
-                "pictureurl": None,
+                "pictureurl": item.get("_picture"),
                 "origin": "instagram",
             })
         return out

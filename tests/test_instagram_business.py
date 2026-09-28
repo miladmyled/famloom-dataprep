@@ -54,7 +54,8 @@ def test_request_uses_business_discovery_field_syntax():
     url = session.get.call_args[0][0]
     params = session.get.call_args[1]["params"]
     assert url == "https://graph.facebook.com/v26.0/17841411111111111"
-    assert params["fields"] == "business_discovery.username(family_hikes){media.limit(25){id,caption,timestamp,permalink,media_type}}"
+    assert params["fields"] == ("business_discovery.username(family_hikes){media.limit(25)"
+                                "{id,caption,timestamp,permalink,media_type,media_url,thumbnail_url}}")
     assert params["access_token"] == "tok"
     assert len(posts) == 4 and posts[0].permalink == "https://www.instagram.com/p/AAA111/"
 
@@ -96,7 +97,8 @@ def test_source_reads_recent_announcements_only_and_skips_non_business_accounts(
     assert src.metrics["accounts_read"] == 1 and src.metrics["accounts_skipped"] == 1
     e = events[0]
     assert e["event_id"] == "instagram_17900000000000001" and e["url"] == "https://www.instagram.com/p/AAA111/"
-    assert e["source"] == "Instagram" and e["origin"] == "instagram" and e["pictureurl"] is None
+    assert e["source"] == "Instagram" and e["origin"] == "instagram"
+    assert e["pictureurl"] == "https://scontent.cdninstagram.com/v/t51/aaa111.jpg"
 
 
 def test_several_events_in_one_caption_get_suffixes():
@@ -121,3 +123,12 @@ def test_timestamp_parsing():
 
 def test_shipped_accounts_file_is_example_only():
     assert all(not a["enabled"] for a in load_accounts())
+
+
+def test_video_posts_use_the_thumbnail_as_picture():
+    from src.net.meta_graph import IgPost
+
+    video = IgPost("1", "c", "t", "p", "VIDEO", "https://video.cdninstagram.com/d.mp4", "https://scontent.cdninstagram.com/thumb.jpg")
+    image = IgPost("2", "c", "t", "p", "IMAGE", "https://scontent.cdninstagram.com/img.jpg", "")
+    assert video.picture == "https://scontent.cdninstagram.com/thumb.jpg"
+    assert image.picture == "https://scontent.cdninstagram.com/img.jpg"

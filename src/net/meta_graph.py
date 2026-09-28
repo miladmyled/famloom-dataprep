@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 GRAPH_HOST = "https://graph.facebook.com"
 DEFAULT_VERSION = "v26.0"
-MEDIA_FIELDS = "id,caption,timestamp,permalink,media_type"
+MEDIA_FIELDS = "id,caption,timestamp,permalink,media_type,media_url,thumbnail_url"
 TOKEN_ERROR_CODES = {190}
 RATE_LIMIT_CODES = {4, 17, 32, 613, 80002}
 USAGE_STOP_PERCENT = 90
@@ -44,6 +44,14 @@ class IgPost:
     timestamp: str
     permalink: str
     media_type: str
+    media_url: str = ""
+    thumbnail_url: str = ""
+
+    @property
+    def picture(self) -> str:
+        """Post picture (video thumbnail for videos). Instagram CDN links are signed and expire
+        after some days; every run re-saves the current link."""
+        return (self.thumbnail_url if self.media_type == "VIDEO" else self.media_url) or self.media_url or self.thumbnail_url
 
 
 class MetaGraphClient:
@@ -109,6 +117,7 @@ class MetaGraphClient:
         self._check_usage(resp.headers)
         media = ((payload.get("business_discovery") or {}).get("media") or {}).get("data") or []
         return [
-            IgPost(m.get("id", ""), m.get("caption") or "", m.get("timestamp") or "", m.get("permalink") or "", m.get("media_type") or "")
+            IgPost(m.get("id", ""), m.get("caption") or "", m.get("timestamp") or "", m.get("permalink") or "",
+                   m.get("media_type") or "", m.get("media_url") or "", m.get("thumbnail_url") or "")
             for m in media if m.get("id")
         ]

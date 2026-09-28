@@ -65,8 +65,12 @@ the network; no scraping of Facebook/Instagram or login-walled content.
    or the event page's `og:image` / clearly matching body image (detail pages fetched politely,
    capped per page, never on Eventbrite/Meetup/resale domains). Logos, icons, SVGs and non-https
    images are skipped. Extracted events are linked to their own page on the listing when the
-   title matches. Instagram and Facebook-snippet events never carry pictures (people, often
-   children, appear in them; Facebook is never fetched).
+   title matches. **Instagram events carry the post's own picture** (`media_url`, or
+   `thumbnail_url` for videos) from the Business Discovery API, with the permalink to the original
+   post (owner's decision 2026-09-27: the posts are public event announcements and link back;
+   confirm the use in Meta App Review). Instagram CDN links are signed and expire after some days;
+   each run re-saves the current link. Facebook-snippet events have no picture: Facebook is never
+   requested and Brave thumbnails would mean storing search results.
 9. **Schedule:** scraper twice a day (05:00 and 16:00 America/Vancouver, cluster v1.35 supports
    `timeZone`); janitor unchanged (daily 01:00 UTC).
 10. **Schema ownership:** two additive app migrations (`city_event_classifications`,
