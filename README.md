@@ -29,13 +29,18 @@ Merging to `main` builds the image and deploys production. Work on feature branc
 | Eventbrite | always | `EVENTBRITE_API_TOKEN` | API search per city |
 | Meetup | always | – | public GraphQL/pages per city |
 | Curated calendars | `CURATED_CALENDARS_ENABLED` | Jev + Gemini for HTML pages | `config/sources/curated_calendars.yaml`, human approved |
-| Web discovery | `WEB_SEARCH_ENABLED` | `BRAVE_SEARCH_API_KEY`, Jev, Gemini | automatic checks + terms check + AI approval; approved pages remembered in `event_source_sites` |
+| Official sites | `OFFICIAL_SITES_ENABLED` | Jev, Gemini | city/venue websites from Wikidata (CC0) → events page → automatic checks + terms check + AI approval; approved pages remembered in `event_source_sites` |
+| Web search | `WEB_SEARCH_ENABLED` (false in prod) | `BRAVE_SEARCH_API_KEY`, Jev, Gemini | same checks; memoryless unless `WEB_SEARCH_REMEMBER_SITES=true` (Brave storage rights) |
 | Facebook snippets | `FACEBOOK_SNIPPETS_ENABLED` (false) | Brave, Jev, Gemini | search-result text only, facebook.com never requested |
 | Instagram | `INSTAGRAM_ENABLED` (false) | `META_*` | Business Discovery API, approved professional accounts only |
 
 A source whose key is missing logs a warning and is skipped; the run continues.
-De-duplication keeps the higher-priority source: Eventbrite/Meetup > curated > Instagram > web
-discovery > Facebook snippets.
+De-duplication keeps the higher-priority source: Eventbrite/Meetup > curated and official sites >
+Instagram > web search > Facebook snippets.
+
+Curated and discovered events get the organizer's own picture (`pictureurl`) from structured
+data, the event's card on the listing, or the event page (`og:image`); Instagram and Facebook
+events never carry pictures.
 
 ### Crawling rules
 
@@ -97,7 +102,7 @@ blocked for web discovery).
 events; needs Meta App Review before `INSTAGRAM_ENABLED=true`.
 
 **A new city:** nothing to do. Cities come from `family_profiles.location`; Eventbrite, Meetup and
-web discovery cover a new city on the next run. Add a `city_primary_language.yaml` entry if the
+official-site discovery (Wikidata) cover a new city on the next run. Add a `city_primary_language.yaml` entry if the
 city's province/country is not listed.
 
 ## City Events contract (shared database)

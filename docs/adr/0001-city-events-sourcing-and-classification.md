@@ -50,11 +50,23 @@ the network; no scraping of Facebook/Instagram or login-walled content.
    (13 approved at GATE 2a), web pages found through Brave Search that pass automatic checks and
    AI approval, Facebook events from search snippets only, and Instagram Business Discovery for
    approved professional accounts. Everything else is rejected.
-8. **New cities need no human approval.** Web discovery searches for official calendars per
-   city, checks https/robots/login/noindex automatically, checks the site's terms of use with Jev,
-   asks Jev to approve (dated events, genuine organizer, family relevant) and remembers approved
-   pages in `event_source_sites`. Rejected sites are never stored. The curated file doubles as a
-   block list.
+8. **New cities need no human approval.** Official-site discovery takes the official websites
+   of the city and its libraries, museums, theatres, community and science centres from
+   **Wikidata (CC0)**, finds each site's events page on the site itself, checks
+   https/robots/login/noindex automatically, checks the site's terms of use with Jev, asks Jev to
+   approve (dated events, genuine organizer, family relevant) and remembers approved pages in
+   `event_source_sites` (`via = wikidata`). Rejected sites are never stored. The curated file
+   doubles as a block list. Brave web search is an optional extra that is **memoryless**
+   (`WEB_SEARCH_REMEMBER_SITES=false`): nothing from search results is stored, only events read
+   from the organizers' own pages; it stays off in production until Brave confirms the Search
+   plan covers this use (storage rights are not listed for the Search plan).
+11. **Pictures.** Curated and discovered events carry the organizer's own promotional picture:
+   JSON-LD `image`, iCal `IMAGE`/`ATTACH`, the picture of the event's card on the listing page,
+   or the event page's `og:image` / clearly matching body image (detail pages fetched politely,
+   capped per page, never on Eventbrite/Meetup/resale domains). Logos, icons, SVGs and non-https
+   images are skipped. Extracted events are linked to their own page on the listing when the
+   title matches. Instagram and Facebook-snippet events never carry pictures (people, often
+   children, appear in them; Facebook is never fetched).
 9. **Schedule:** scraper twice a day (05:00 and 16:00 America/Vancouver, cluster v1.35 supports
    `timeZone`); janitor unchanged (daily 01:00 UTC).
 10. **Schema ownership:** two additive app migrations (`city_event_classifications`,
@@ -96,8 +108,13 @@ the network; no scraping of Facebook/Instagram or login-walled content.
 - Discovered sites: robots checked automatically and terms checked by Jev. Accepted risk: an
   automated terms check can miss restrictions; if an owner objects, add the domain to
   `config/sources/blocked_domains.yaml` and purge its events.
-- **Brave:** storing derived results requires a Brave plan that grants storage rights. Web
-  discovery and snippets must not be enabled in production before that is confirmed.
+- **Brave:** storing results requires a plan that explicitly grants storage rights; the
+  "Search" plan in use does not list them. Therefore Brave search is memoryless and disabled in
+  production (`WEB_SEARCH_ENABLED=false`) until Brave (api-sales@brave.com) confirms; Facebook
+  snippets, which would store snippet-derived data, stay disabled. Official-site discovery uses
+  Wikidata (CC0) and needs no search API.
+- **Pictures** are hotlinked from the organizer's site (the app loads them from there), the same
+  way Eventbrite pictures are used today.
 - **Meta:** Instagram needs App Review (instagram_basic, pages_read_engagement, and related
   permissions); confirm in review that showing extracted event info with a link back is allowed.
 
