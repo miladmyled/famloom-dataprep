@@ -85,3 +85,29 @@ def test_curated_html_events_get_pictures_end_to_end():
     event = src.normalize_data(src.fetch_raw_events())[0]
     assert event["url"] == "https://cards.example/events/pancake-breakfast"
     assert event["pictureurl"] == "https://cards.example/img/pancakes.jpg"
+
+
+def test_generic_link_text_matches_on_card_text_and_eventbrite_is_never_opened():
+    html = """<main>
+      <div class="ev"><img src="/img/weave.jpg"><h3>Coast Salish Wool Weaving</h3>
+        <a href="https://www.eventbrite.ca/e/coast-salish-wool-weaving-tickets-1">REGISTER HERE</a></div>
+      <div class="ev"><h3>Ghostly Galleries</h3>
+        <a href="https://www.eventbrite.ca/e/ghostly-galleries-tickets-2">REGISTER HERE</a></div></main>"""
+    http, session = _http({})
+    events = [_ev("Coast Salish Wool Weaving"), _ev("Ghostly Galleries")]
+    enrich_events(events, html, "https://museum.example/events/", http)
+    assert events[0]["event_url"].endswith("coast-salish-wool-weaving-tickets-1")
+    assert events[0]["picture"] == "https://museum.example/img/weave.jpg"
+    assert events[1]["event_url"].endswith("ghostly-galleries-tickets-2") and events[1]["picture"] is None
+    assert not any("eventbrite" in u for u in session.requested)
+
+
+def test_ical_relative_and_self_links():
+    from icalendar import Event
+    from src.etl.curated_calendars import _ical_event_url
+
+    feed = "https://www.coquitlam.ca/common/modules/iCalendar/iCalendar.aspx?feed=calendar&catID=22"
+    e = Event(); e.add("URL", "/common/modules/iCalendar/iCalendar.aspx?feed=calendar&catID=22")
+    assert _ical_event_url(e, feed) is None
+    e2 = Event(); e2.add("URL", "/Calendar.aspx?EID=5")
+    assert _ical_event_url(e2, feed) == "https://www.coquitlam.ca/Calendar.aspx?EID=5"

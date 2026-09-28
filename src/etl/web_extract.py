@@ -201,19 +201,23 @@ def link_cards(html: str, base_url: str) -> List[Dict[str, Optional[str]]]:
         if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
             continue
         text = _WS_RE.sub(" ", a.get_text(" ", strip=True))
-        img, node = a.find("img"), a
+        img, node, card = a.find("img"), a, a
         for _ in range(3):
-            if img is not None or node.parent is None:
+            if node.parent is None:
                 break
             node = node.parent
-            if len(node.find_all("a", href=True)) > 1:
-                break  # a container shared with other links is not this event's card
-            img = node.find("img")
+            hrefs = {x["href"].strip() for x in node.find_all("a", href=True)}
+            if len(hrefs) > 1:
+                break  # a container shared with other events' links is not this event's card
+            card = node
+            if img is None:
+                img = node.find("img")
         if not text:
             text = (img.get("alt") or "").strip() if img is not None else ""
         if not text:
             continue
         cards.append({"text": text, "href": urljoin(base_url, href),
+                      "context": _WS_RE.sub(" ", card.get_text(" ", strip=True))[:400],
                       "image": clean_image_url(_img_src(img), base_url) if img is not None else None})
     return cards
 
@@ -223,8 +227,13 @@ def match_card(title: str, cards: List[Dict[str, Optional[str]]], threshold: int
     from rapidfuzz import fuzz
 
     best, best_score = None, threshold - 1
+    title = title.lower()
     for card in cards:
-        score = fuzz.token_set_ratio(title.lower(), card["text"].lower())
-        if score > best_score and len(card["text"]) >= 4:
+        score = fuzz.token_set_ratio(title, card["text"].lower()) if len(card["text"]) >= 4 else 0
+        context = (card.get("context") or "").lower()
+        if context and len(title) >= 8:
+            # generic link text ("Register here"): match the title inside the card's text
+            score = max(score, fuzz.partial_ratio(title, context) - 5)
+        if score > best_score:
             best, best_score = card, score
     return best

@@ -16,6 +16,15 @@ from src.etl.web_extract import jsonld_events, jsonld_image, link_cards, match_c
 logger = logging.getLogger(__name__)
 
 
+def _no_detail_fetch(url: str) -> bool:
+    """Never open pages of platforms read through their API or of blocked sites (e.g. Eventbrite)."""
+    from src.etl.web_search_discovery import domain_matches, load_blocked_domains
+    from src.net.http import host_of
+
+    return domain_matches(host_of(url), load_blocked_domains())
+
+
+
 def enrich_events(events: List[Dict[str, Any]], page_html: str, page_url: str, http, max_detail_fetches: int = None) -> List[Dict[str, Any]]:
     if not events:
         return events
@@ -33,6 +42,8 @@ def enrich_events(events: List[Dict[str, Any]], page_html: str, page_url: str, h
             if not event.get("picture") and card.get("image"):
                 event["picture"] = card["image"]
         if event.get("picture") or not event.get("event_url") or http is None or fetched >= limit:
+            continue
+        if _no_detail_fetch(event["event_url"]):
             continue
         fetched += 1
         try:

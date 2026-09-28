@@ -62,7 +62,9 @@ def _to_utc(value: Any, tz) -> Optional[datetime]:
     return None
 
 
-def parse_ical(text: str, tz) -> List[Dict[str, Any]]:
+def parse_ical(text: str, tz, feed_url: str = "") -> List[Dict[str, Any]]:
+    from urllib.parse import urljoin
+
     from icalendar import Calendar
 
     events = []
@@ -78,11 +80,24 @@ def parse_ical(text: str, tz) -> List[Dict[str, Any]]:
             "end_date": _to_utc(end.dt, tz) if end else None,
             "location_summary": str(component.get("LOCATION") or "").strip() or None,
             "description": str(component.get("DESCRIPTION") or "").strip() or None,
-            "event_url": str(component.get("URL") or "").strip() or None,
+            "event_url": _ical_event_url(component, feed_url),
             "canceled": str(component.get("STATUS") or "").upper() == "CANCELLED",
             "picture": _ical_picture(component),
         })
     return events
+
+
+def _ical_event_url(component, feed_url: str) -> Optional[str]:
+    """Absolute URL of the event; a link back to the feed itself is not an event page."""
+    from urllib.parse import urljoin
+
+    raw = str(component.get("URL") or "").strip()
+    if not raw:
+        return None
+    absolute = urljoin(feed_url or "", raw)
+    if not absolute.startswith(("http://", "https://")) or absolute.split("?")[0] == (feed_url or "").split("?")[0]:
+        return None
+    return absolute
 
 
 def _ical_picture(component) -> Optional[str]:
@@ -190,7 +205,7 @@ class CuratedCalendarSource(BaseEventScraper):
         if page.status != 200:
             raise RuntimeError(f"HTTP {page.status}")
         if kind == "ical":
-            return parse_ical(page.text, self.tz)
+            return parse_ical(page.text, self.tz, page.url)
         if kind == "rss":
             import feedparser
 
