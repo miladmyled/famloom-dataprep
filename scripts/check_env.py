@@ -33,8 +33,8 @@ def check_db():
         conn.read_only = True
         cur = conn.cursor()
         cur.execute("SELECT 1")
-        cur.execute("SELECT to_regclass('public.city_event_classifications') IS NOT NULL")
-        table = cur.fetchone()[0]
+        cur.execute("SELECT to_regclass('public.city_event_classifications') IS NOT NULL, to_regclass('public.event_source_sites') IS NOT NULL")
+        table, sites_table = cur.fetchone()
         cur.execute("SELECT has_table_privilege(current_user, 'city_event_classifications', 'INSERT')" if table else "SELECT false")
         can_write = cur.fetchone()[0]
         cur.execute(
@@ -42,8 +42,9 @@ def check_db():
             "WHERE q.code = 'languages' AND q.is_active AND v.is_active"
         )
         languages = cur.fetchone()[0]
-    ok = table and can_write and languages > 0
-    return ok, f"{os.getenv('DB_NAME')}: classifications table={'yes' if table else 'MISSING'}, insert={'yes' if can_write else 'no'}, languages={languages}"
+    ok = table and sites_table and can_write and languages > 0
+    return ok, (f"{os.getenv('DB_NAME')}: classifications table={'yes' if table else 'MISSING'}, "
+                f"source-sites table={'yes' if sites_table else 'MISSING'}, insert={'yes' if can_write else 'no'}, languages={languages}")
 
 
 def check_jev():
@@ -78,7 +79,7 @@ def check_brave():
 def check_meta():
     import requests
 
-    version = os.getenv("META_GRAPH_API_VERSION")
+    version = os.getenv("META_GRAPH_API_VERSION") or "v26.0"
     r = requests.get(f"https://graph.facebook.com/{version}/{os.environ['META_IG_USER_ID']}",
                      params={"fields": "id", "access_token": os.environ["META_ACCESS_TOKEN"]}, timeout=15)
     return r.status_code == 200, f"HTTP {r.status_code}"
@@ -100,7 +101,7 @@ CHECKS = [
     ("jev", "Jev", ["TYPESAFE_API_KEY"], check_jev, False),
     ("gemini", "Gemini", ["GEMINI_API_KEY", "GEMINI_MODEL"], check_gemini, False),
     ("brave", "Brave", ["BRAVE_SEARCH_API_KEY"], check_brave, False),
-    ("meta", "Meta Graph", ["META_GRAPH_API_VERSION", "META_IG_USER_ID", "META_ACCESS_TOKEN"], check_meta, False),
+    ("meta", "Meta Graph", ["META_IG_USER_ID", "META_ACCESS_TOKEN"], check_meta, False),
     ("kafka", "Kafka", ["KAFKA_BOOTSTRAP_SERVERS"], check_kafka, False),
 ]
 
