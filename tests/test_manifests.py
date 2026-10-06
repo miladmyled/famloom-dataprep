@@ -23,10 +23,10 @@ def test_scraper_runs_twice_a_day_in_vancouver_time():
     assert _env(doc)["TYPESAFE_MODEL"] == "jev-1.13.0"
 
 
-def test_janitor_schedule_unchanged_and_classified_removal_off_until_gate3():
+def test_janitor_schedule_unchanged_and_classified_removal_enabled():
     doc = _load("janitor-cronjob.yaml")
     assert doc["spec"]["schedule"] == "0 1 * * *"
-    assert _env(doc)["JANITOR_REMOVE_CLASSIFIED"] == "false"
+    assert _env(doc)["JANITOR_REMOVE_CLASSIFIED"] == "true"
 
 
 def test_dockerfile_ships_config_directory():

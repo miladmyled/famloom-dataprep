@@ -22,6 +22,9 @@ Design decisions and trade-offs: [docs/adr/0001-city-events-sourcing-and-classif
 
 Merging to `main` builds the image and deploys production. Work on feature branches from `dev`.
 
+Kafka itself (Helm release `famloom-broker`, namespace `kafka`) is installed by hand, not by ArgoCD;
+its production overrides, upgrade command and health checks are in [infra/kafka/](infra/kafka/README.md).
+
 ## Sources
 
 | Source | Flag | Needs | Notes |
