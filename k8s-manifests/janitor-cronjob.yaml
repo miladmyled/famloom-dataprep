@@ -28,10 +28,10 @@ spec:
               value: "1"
             - name: PYTHONIOENCODING
               value: "utf-8"
-            # Remove events the scraper classified as rejected/canceled. Stays "false" until the
-            # first dev cleanup has been reviewed (GATE 3); then set to "true".
+            # Remove events the scraper classified as rejected/canceled (enabled 2026-10-06 after
+            # the dev cleanup (GATE 3) and the first production runs were reviewed).
             - name: JANITOR_REMOVE_CLASSIFIED
-              value: "false"
+              value: "true"
             - name: REVIEW_POLICY
               value: "drop"
             # Injects database credentials from Kubernetes secret
