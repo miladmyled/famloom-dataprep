@@ -1,0 +1,15 @@
+# Web-discovery search templates. {city} is the first part of the city ("North Vancouver").
+# Each query costs one Brave request; the run stops at BRAVE_MAX_QUERIES_PER_RUN.
+# Official-calendar queries come first so libraries, cities and venues are found for new cities.
+
+discovery:
+  - "{city} public library events"
+  - "{city} parks and recreation events calendar"
+  - "{city} community centre events"
+  - "{city} museum events"
+  - "family events {city} this weekend"
+  - "kids storytime {city}"
+  - "family festival {city}"
+  - "toddler drop-in {city}"
+  - "family hike {city}"
+  - "family friendly live music {city} restaurant"

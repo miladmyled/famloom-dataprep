@@ -26,7 +26,11 @@ from src.etl.extractor import get_active_cities
 from src.etl.eventbrite import EventbriteScraper
 from src.etl.meetup_public import MeetupExtractor
 from src.etl.transformer import clean_and_validate_event
-from src.db.events import init_db_schema, upsert_city_event, get_active_interests
+from src.db.events import upsert_city_event
+from src.classify.cache import ClassificationCache
+from src.classify.factory import get_classifier
+from src.classify.stage import classify_events
+from src.classify.taxonomy import get_active_taxonomy
 
 
 def load_events_for_active_cities() -> int:
@@ -35,16 +39,15 @@ def load_events_for_active_cities() -> int:
     logger.info("🚀 Starting Live Event Ingestion into Azure PostgreSQL")
     logger.info("==================================================")
 
-    # 1. Initialize DB Pool and verify schema
+    # 1. Initialize DB pool, taxonomy and classifier (same family filter and tags as main.py)
     pool = get_db_pool()
-    try:
-        init_db_schema(pool)
-    except Exception as e:
-        logger.error(f"❌ Error initializing DB schema: {e}")
-
-    # Fetch active interests for tagging
-    active_interests = get_active_interests(pool)
-    logger.info(f"🏷️ Loaded {len(active_interests)} active interest tags for enrichment.")
+    logger.info(f"🎯 Target database: {os.getenv('DB_HOST')} / {os.getenv('DB_NAME')}")
+    if os.getenv("DB_NAME") == "x3db":
+        logger.error("❌ Refusing to load directly into the production database.")
+        return 1
+    taxonomy = get_active_taxonomy(pool)
+    chain = get_classifier()
+    cache = ClassificationCache(pool)
 
     # 2. Fetch active cities from Azure PostgreSQL
     raw_cities = get_active_cities()
@@ -79,22 +82,22 @@ def load_events_for_active_cities() -> int:
                 normalized = scraper.normalize_data(raw_events)
                 logger.info(f"Normalized {len(normalized)} raw event payloads for '{name}'.")
 
-                task_valid = 0
-                for raw_dict in normalized:
-                    event = clean_and_validate_event(raw_dict, interest_tags=active_interests)
+                valid = [e for e in (clean_and_validate_event(r) for r in normalized) if e is not None]
+                metrics["valid_events"] += len(valid)
+                metrics["dropped_events"] += len(normalized) - len(valid)
+                stage = classify_events(valid, chain, cache, taxonomy)
+                metrics["dropped_events"] += len(valid) - len(stage.publish)
 
-                    if event is not None:
-                        metrics["valid_events"] += 1
-                        task_valid += 1
-                        try:
-                            upsert_city_event(conn, event)
-                            conn.commit()
-                            metrics["upserted_to_db"] += 1
-                        except Exception as upsert_err:
-                            conn.rollback()
-                            logger.error(f"❌ Failed to upsert event '{event.title}': {upsert_err}")
-                            metrics["dropped_events"] += 1
-                    else:
+                task_valid = 0
+                for event in stage.publish:
+                    task_valid += 1
+                    try:
+                        upsert_city_event(conn, event)
+                        conn.commit()
+                        metrics["upserted_to_db"] += 1
+                    except Exception as upsert_err:
+                        conn.rollback()
+                        logger.error(f"❌ Failed to upsert event '{event.title}': {upsert_err}")
                         metrics["dropped_events"] += 1
 
                 logger.info(f"✅ '{name}': Successfully validated & upserted {task_valid} events.")

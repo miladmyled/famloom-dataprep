@@ -9,6 +9,7 @@ import requests
 from dotenv import load_dotenv
 
 from src.etl.base import BaseEventScraper
+from src.models.event import stable_fallback_id
 
 load_dotenv(override=True)
 logger = logging.getLogger(__name__)
@@ -304,7 +305,7 @@ class EventbriteScraper(BaseEventScraper):
             # Extract idempotency key: unique event_id
             raw_id = raw.get("id") or raw.get("eid") or raw.get("eventbrite_event_id")
             if not raw_id and "url" in raw:
-                raw_id = str(abs(hash(raw["url"])) % 100000000)
+                raw_id = stable_fallback_id("Eventbrite", str(raw["url"]))
             event_id = f"eventbrite_{raw_id}" if raw_id and not str(raw_id).startswith("eventbrite_") else str(raw_id or "")
 
             # Extract title

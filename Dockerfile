@@ -15,6 +15,7 @@ RUN playwright install --with-deps chromium
 
 # Copy source code and entrypoints into the container
 COPY src/ ./src/
+COPY config/ ./config/
 COPY main.py .
 COPY consumer_main.py .
 COPY janitor.py .

@@ -1,0 +1,20 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//CivicPlus//Calendar//EN
+BEGIN:VEVENT
+UID:evt-1@coquitlam.ca
+SUMMARY:Family Movie Night in the Park
+DTSTART;TZID=America/Vancouver:{D1}T190000
+DTEND;TZID=America/Vancouver:{D1}T210000
+LOCATION:Town Centre Park\, 1299 Pinetree Way\, Coquitlam
+URL:https://www.coquitlam.ca/Calendar.aspx?EID=101
+DESCRIPTION:Bring a blanket.
+END:VEVENT
+BEGIN:VEVENT
+UID:evt-2@coquitlam.ca
+SUMMARY:Canceled Lantern Walk
+DTSTART;VALUE=DATE:{D2}
+LOCATION:Lafarge Lake
+STATUS:CANCELLED
+END:VEVENT
+END:VCALENDAR

@@ -1,0 +1,7 @@
+{"head":{"vars":["o","oLabel","kindLabel","site"]},"results":{"bindings":[
+ {"o":{"type":"uri","value":"http://www.wikidata.org/entity/Q1"},"oLabel":{"type":"literal","value":"Harbour Science Centre"},"kindLabel":{"type":"literal","value":"museum"},"site":{"type":"uri","value":"https://www.harbourscience.example/"}},
+ {"o":{"type":"uri","value":"http://www.wikidata.org/entity/Q1"},"oLabel":{"type":"literal","value":"Harbour Science Centre"},"kindLabel":{"type":"literal","value":"science museum"},"site":{"type":"uri","value":"https://www.harbourscience.example/"}},
+ {"o":{"type":"uri","value":"http://www.wikidata.org/entity/Q2"},"oLabel":{"type":"literal","value":"Riverside Community Centre"},"kindLabel":{"type":"literal","value":"community centre"},"site":{"type":"uri","value":"http://riverside.example"}},
+ {"o":{"type":"uri","value":"http://www.wikidata.org/entity/Q3"},"oLabel":{"type":"literal","value":"Science World"},"kindLabel":{"type":"literal","value":"museum"},"site":{"type":"uri","value":"https://www.scienceworld.ca/"}},
+ {"o":{"type":"uri","value":"http://www.wikidata.org/entity/Q4"},"oLabel":{"type":"literal","value":"Quiet Library"},"kindLabel":{"type":"literal","value":"library"},"site":{"type":"uri","value":"https://quiet.example/"}}
+]}}

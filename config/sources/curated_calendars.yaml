@@ -1,0 +1,268 @@
+# Curated event calendars read on every run (decision 9: accredited sources only).
+# A page is used only when `enabled: true`. Every entry records when robots.txt and the site's
+# written terms were checked and what they say. Pages whose robots.txt or terms forbid
+# automated access stay in this file with enabled: false and the reason, so nobody re-adds them.
+#
+# kind:   ical | rss | jsonld | html      (html = main text -> Jev screen -> Gemini extraction)
+# render: static | js                      (js = needs a headless browser; only where allowed)
+# All checks below were done 2026-09-27 with User-Agent "FamLoomBot/1.0 (+mailto:miladmyled@gmail.com)".
+# GATE 2a (2026-09-27): the user approved every entry marked `approved`. Disabled entries also act
+# as a block list: web discovery never uses a site listed here with enabled: false.
+
+# ---------------------------------------------------------------- Coquitlam
+- city: Coquitlam, BC, Canada
+  name: City of Coquitlam - City Calendar
+  url: https://www.coquitlam.ca/common/modules/iCalendar/iCalendar.aspx?catID=22&feed=calendar
+  kind: ical
+  render: static
+  source_label: City of Coquitlam
+  enabled: true
+  approved: 2026-09-27  # GATE 2a
+  robots_checked: 2026-09-27
+  robots_notes: "iCalendar.aspx not disallowed (CurrentEvents*.aspx and RSS.aspx are)"
+  terms_checked: 2026-09-27
+  terms_notes: "Only a copyright notice (/copyright); feed is published for subscription. Low volume (4 events)."
+
+- city: Coquitlam, BC, Canada
+  name: Place des Arts events
+  url: https://www.placedesarts.ca/events
+  kind: html
+  render: static
+  source_label: Place des Arts
+  enabled: true
+  approved: 2026-09-27  # GATE 2a
+  robots_checked: 2026-09-27
+  robots_notes: "User-agent * Disallow: (nothing)"
+  terms_checked: 2026-09-27
+  terms_notes: "No terms of use published on the site."
+
+- city: Coquitlam, BC, Canada
+  name: Evergreen Cultural Centre events
+  url: https://evergreenarts.ca/events/
+  kind: html
+  render: static
+  source_label: Evergreen Cultural Centre
+  enabled: true
+  approved: 2026-09-27  # GATE 2a
+  robots_checked: 2026-09-27
+  robots_notes: "No blanket disallow"
+  terms_checked: 2026-09-27
+  terms_notes: "No terms of use published (privacy policy PDF only)."
+
+- city: Coquitlam, BC, Canada
+  name: Coquitlam Public Library events (LibNet)
+  url: https://coqlibrary.libnet.info/events
+  kind: html
+  render: static
+  source_label: Coquitlam Public Library
+  enabled: false
+  robots_checked: 2026-09-27
+  robots_notes: "robots.txt empty"
+  terms_checked: 2026-09-27
+  terms_notes: "Terms link on the LibNet site redirects to google.co.uk; terms unknown. Ask the library before enabling."
+
+# ---------------------------------------------------------------- North Vancouver
+- city: North Vancouver, BC, Canada
+  name: North Vancouver City Library events
+  url: https://www.nvcl.ca/events
+  kind: html
+  render: static
+  source_label: North Vancouver City Library
+  enabled: true
+  approved: 2026-09-27  # GATE 2a
+  robots_checked: 2026-09-27
+  robots_notes: "Only /core/, /profiles/, /admin/ etc. disallowed"
+  terms_checked: 2026-09-27
+  terms_notes: "Library policies page covers privacy only; no restriction on reuse found."
+
+- city: North Vancouver, BC, Canada
+  name: MONOVA (Museum & Archives of North Vancouver) events
+  url: https://monova.ca/events/
+  kind: html
+  render: static
+  source_label: MONOVA
+  enabled: true
+  approved: 2026-09-27  # GATE 2a
+  robots_checked: 2026-09-27
+  robots_notes: "Only /feed/, /wp-admin/ etc. disallowed; /events/ allowed. /events/feed/ exists but is empty."
+  terms_checked: 2026-09-27
+  terms_notes: "No terms of use published."
+
+- city: North Vancouver, BC, Canada
+  name: The Polygon Gallery events
+  url: https://thepolygon.ca/events
+  kind: html
+  render: static
+  source_label: The Polygon Gallery
+  enabled: true
+  approved: 2026-09-27  # GATE 2a
+  robots_checked: 2026-09-27
+  robots_notes: "No blanket disallow"
+  terms_checked: 2026-09-27
+  terms_notes: "No terms of use published."
+
+- city: North Vancouver, BC, Canada
+  name: City of North Vancouver events
+  url: https://www.cnv.org/events
+  kind: html
+  render: js
+  source_label: City of North Vancouver
+  enabled: true
+  approved: 2026-09-27  # GATE 2a
+  robots_checked: 2026-09-27
+  robots_notes: "No robots.txt (404) = no restrictions"
+  terms_checked: 2026-09-27
+  terms_notes: "Privacy policy and translate disclaimer only. Event list is rendered by JavaScript (Playwright)."
+
+- city: North Vancouver, BC, Canada
+  name: District of North Vancouver events
+  url: https://www.dnv.org/events
+  kind: html
+  render: js
+  source_label: District of North Vancouver
+  enabled: true
+  approved: 2026-09-27  # GATE 2a
+  robots_checked: 2026-09-27
+  robots_notes: "User-agent * Disallow: (nothing)"
+  terms_checked: 2026-09-27
+  terms_notes: "No terms of use found. Event list is rendered by JavaScript (Playwright)."
+
+- city: North Vancouver, BC, Canada
+  name: North Vancouver District Public Library
+  url: https://www.nvdpl.ca/
+  kind: html
+  render: static
+  source_label: North Vancouver District Public Library
+  enabled: false
+  robots_checked: 2026-09-27
+  robots_notes: "Allowed"
+  terms_checked: 2026-09-27
+  terms_notes: "No public events page found (/events 404; BiblioCommons events disabled). Nothing to read yet."
+
+# ---------------------------------------------------------------- Vancouver
+- city: Vancouver, BC, Canada
+  name: Science World events
+  url: https://www.scienceworld.ca/events/
+  kind: html
+  render: js
+  source_label: Science World
+  enabled: false  # approved at GATE 2a, disabled 2026-09-27 for a technical reason (see terms_notes)
+  robots_checked: 2026-09-27
+  robots_notes: "User-agent * Disallow: (nothing)"
+  terms_checked: 2026-09-27
+  terms_notes: "Legal page covers privacy only; no restriction on automated access or reuse. JS-rendered list. 2026-09-27 dev run: the listing only renders after accepting the cookie banner, which the crawler never does, so the page yields no events. Revisit, or ask Science World for a feed."
+
+- city: Vancouver, BC, Canada
+  name: H.R. MacMillan Space Centre events
+  url: https://www.spacecentre.ca/events
+  kind: html
+  render: static
+  source_label: H.R. MacMillan Space Centre
+  enabled: true
+  approved: 2026-09-27  # GATE 2a
+  robots_checked: 2026-09-27
+  robots_notes: "No blanket disallow"
+  terms_checked: 2026-09-27
+  terms_notes: "No terms of use published."
+
+- city: Vancouver, BC, Canada
+  name: Vancouver Maritime Museum events
+  url: https://vanmaritime.com/events
+  kind: html
+  render: static
+  source_label: Vancouver Maritime Museum
+  enabled: true
+  approved: 2026-09-27  # GATE 2a
+  robots_checked: 2026-09-27
+  robots_notes: "No blanket disallow"
+  terms_checked: 2026-09-27
+  terms_notes: "No terms of use published."
+
+- city: Vancouver, BC, Canada
+  name: Vancouver Art Gallery events
+  url: https://www.vanartgallery.bc.ca/events
+  kind: html
+  render: static
+  source_label: Vancouver Art Gallery
+  enabled: true
+  approved: 2026-09-27  # GATE 2a
+  robots_checked: 2026-09-27
+  robots_notes: "No blanket disallow"
+  terms_checked: 2026-09-27
+  terms_notes: "No terms of use link found on the site."
+
+- city: Vancouver, BC, Canada
+  name: Grouse Mountain events
+  url: https://www.grousemountain.com/events
+  kind: html
+  render: static
+  source_label: Grouse Mountain
+  enabled: true
+  approved: 2026-09-27  # GATE 2a
+  robots_checked: 2026-09-27
+  robots_notes: "No blanket disallow"
+  terms_checked: 2026-09-27
+  terms_notes: "No terms of use link found (commercial venue; events are its own)."
+
+- city: Vancouver, BC, Canada
+  name: Vancouver Public Library events (BiblioCommons)
+  url: https://vpl.bibliocommons.com/v2/events
+  kind: html
+  render: js
+  source_label: Vancouver Public Library
+  enabled: false
+  robots_checked: 2026-09-27
+  robots_notes: "Allowed with Crawl-delay: 120"
+  terms_checked: 2026-09-27
+  terms_notes: >-
+    BiblioCommons terms forbid using any automated system to harvest content except RSS/XML feeds,
+    and forbid republishing content beyond personal use. No events RSS exists (only an internal
+    JSON API). Disabled; ask VPL for permission or a feed.
+
+- city: Burnaby, BC, Canada
+  name: Burnaby Public Library events (BiblioCommons)
+  url: https://bpl.bibliocommons.com/v2/events
+  kind: html
+  render: js
+  source_label: Burnaby Public Library
+  enabled: false
+  robots_checked: 2026-09-27
+  robots_notes: "Allowed with Crawl-delay"
+  terms_checked: 2026-09-27
+  terms_notes: "Same BiblioCommons terms as VPL. Disabled; ask the library."
+
+- city: Vancouver, BC, Canada
+  name: City of Vancouver / Vancouver Park Board events
+  url: https://vancouver.ca/news-calendar/calendar-of-events.aspx
+  kind: html
+  render: static
+  source_label: City of Vancouver
+  enabled: false
+  robots_checked: 2026-09-27
+  robots_notes: "vancouver.ca answers 403 to our User-Agent (bot protection), even for robots.txt. Never bypassed."
+  terms_checked: 2026-09-27
+  terms_notes: "Not reachable. Ask the City for an open-data feed."
+
+- city: Vancouver, BC, Canada
+  name: Vancouver Aquarium events
+  url: https://www.vanaqua.org/events
+  kind: html
+  render: static
+  source_label: Vancouver Aquarium
+  enabled: false
+  robots_checked: 2026-09-27
+  robots_notes: "403 to our User-Agent (bot protection). Never bypassed."
+  terms_checked: 2026-09-27
+  terms_notes: "Not reachable."
+
+- city: Vancouver, BC, Canada
+  name: Destination Vancouver events
+  url: https://www.destinationvancouver.com/events/
+  kind: html
+  render: static
+  source_label: Destination Vancouver
+  enabled: false
+  robots_checked: 2026-09-27
+  robots_notes: "Allowed (except /api/)"
+  terms_checked: 2026-09-27
+  terms_notes: "Terms of service forbid copying content without express prior written consent and limit access to a commercial web browser. Disabled."

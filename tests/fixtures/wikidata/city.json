@@ -1,0 +1,3 @@
+{"head":{"vars":["c","cLabel","site"]},"results":{"bindings":[
+ {"c":{"type":"uri","value":"http://www.wikidata.org/entity/Q1001626"},"cLabel":{"type":"literal","value":"North Vancouver"},"site":{"type":"uri","value":"https://www.cityhall.example/"}}
+]}}

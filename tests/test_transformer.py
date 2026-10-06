@@ -123,7 +123,8 @@ def test_match_interest_tags_whole_word_and_case_insensitive():
     assert match_interest_tags("Art and Sports", None, {}) == []
 
 
-def test_clean_and_validate_event_with_interest_tags():
+def test_clean_and_validate_event_does_not_tag():
+    """Tagging moved to the classification stage; interest_tags is accepted but ignored."""
     future_date = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
     raw = {
         "event_id": "eb_tagged_1",
@@ -134,19 +135,8 @@ def test_clean_and_validate_event_with_interest_tags():
         "start_date": future_date,
     }
 
-    interest_mapping = {
-        "soccer": 10,
-        "sports": 20,
-        "music": 30,
-        "art": 40,
-    }
-
-    event = clean_and_validate_event(raw, interest_tags=interest_mapping)
+    event = clean_and_validate_event(raw, interest_tags={"soccer": 10, "sports": 20})
     assert event is not None
     assert event.event_id == "eb_tagged_1"
-    # Should match soccer, sports, music (10, 20, 30), but not art (40)
-    assert 10 in event.tag_ids
-    assert 20 in event.tag_ids
-    assert 30 in event.tag_ids
-    assert 40 not in event.tag_ids
-
+    assert event.tag_ids == []
+    assert event.replace_tags is False
